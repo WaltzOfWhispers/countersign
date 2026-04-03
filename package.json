@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "start": "node src/server.js",
+    "mcp:start": "node src/mcp/server.js",
     "agent:install": "node src/cli/install-agent.js",
     "agent:claim": "node src/cli/claim-agent.js",
     "agent:pay": "node src/cli/request-payment.js",

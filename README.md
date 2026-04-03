@@ -18,19 +18,34 @@ In the current wedge, the user installs a local wallet daemon and claims it to a
 
 That means the approval path is anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
-## SDK Surface
+## Choose A Surface
 
-Countersign now exposes a packaged travel-agent SDK from the package root. The travel agent does not need to reimplement canonical JSON signing, relay request construction, or wallet receipt verification itself.
+Countersign currently exposes two integration surfaces:
 
-From a separate repo today, install it directly from GitHub:
+- a packaged SDK for a remote travel agent or any server-side business backend
+- a local MCP server so Claude can act on behalf of the wallet owner
+
+Use the SDK when your separate travel agent service needs to request authorization and capture charges. Use the MCP server when you want to talk to Claude and have Claude create wallets, install or claim the local daemon, inspect pending requests, and approve or reject them.
+
+## SDK Setup
+
+The travel-agent SDK is the right surface for your separate travel agent repo. It wraps the signed relay protocol so the travel agent does not have to reimplement canonical JSON signing, relay request construction, or wallet receipt verification itself.
+
+Install it from GitHub in the travel-agent repo:
 
 ```bash
 npm install github:WaltzOfWhispers/countersign
 ```
 
+Then import it:
+
 ```js
 import { createCountersignClient } from 'countersign';
+```
 
+Construct the client with the Countersign base URL, the travel agent's persistent `agentId`, and the travel agent private key:
+
+```js
 const client = createCountersignClient({
   baseUrl: 'https://wallet.example.com',
   agentId: 'travel-agent',
@@ -55,6 +70,52 @@ if (authorization.receipt.payload.status === 'approved') {
 }
 ```
 
+The full travel-agent handoff contract is in [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md).
+
+## MCP Setup
+
+Countersign also includes a local MCP server so Claude can perform wallet actions directly. The MCP server talks to the same Countersign data store and local wallet installation files, so Claude can create wallets, generate claim tokens, install and claim local wallet identities, inspect pending requests, and approve or reject them.
+
+From the Countersign repo, start it with:
+
+```bash
+npm run mcp:start
+```
+
+Then point Claude at it with an MCP config like this:
+
+```json
+{
+  "mcpServers": {
+    "countersign": {
+      "command": "npm",
+      "args": ["run", "mcp:start"],
+      "cwd": "/Users/christycui/Documents/agent_wallet"
+    }
+  }
+}
+```
+
+The MCP server exposes these wallet tools:
+
+- `create_wallet`
+- `get_wallet`
+- `fund_wallet`
+- `set_wallet_policy`
+- `generate_claim_token`
+- `install_wallet_daemon`
+- `claim_wallet_daemon`
+- `list_pending_wallet_requests`
+- `review_wallet_request`
+
+If you want the MCP server to use a different store location, set:
+
+- `COUNTERSIGN_DATA_FILE`
+- `COUNTERSIGN_WALLET_DIR`
+- `COUNTERSIGN_TRUSTED_AGENTS_JSON` for local testing with known travel-agent keys
+
+The MCP-specific setup doc is in [docs/mcp-server.md](/Users/christycui/Documents/agent_wallet/docs/mcp-server.md).
+
 ## Current Phase 1 Wedge
 
 This repository is intentionally narrow. It is not yet a general-purpose wallet for every agent and every rail. It is a proof of one opinionated loop: a remote travel agent business requests payment, a local wallet daemon authorizes it, and the business captures the charge only after receiving a wallet-signed receipt. In practice that means a local CLI or daemon wallet, a relay embedded in the MVP server, a remote travel agent backend as the requester, and a Stripe-style capture path after wallet authorization.
@@ -71,7 +132,7 @@ The purpose of this MVP is to validate the trust model before expanding into mob
 
 ## Integration Contract
 
-If you are implementing the remote travel agent side, the handoff contract is in [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md). It documents the request and response shapes, signing rules, onboarding assumptions, and the SDK methods the travel agent should call in this MVP.
+If you are implementing the remote travel agent side, the handoff contract is in [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md). If you are wiring Claude into local wallet control, use [docs/mcp-server.md](/Users/christycui/Documents/agent_wallet/docs/mcp-server.md).
 
 ## Run It
 

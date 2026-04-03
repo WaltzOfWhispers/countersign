@@ -18,6 +18,43 @@ In the current wedge, the user installs a local wallet daemon and claims it to a
 
 That means the approval path is anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
+## SDK Surface
+
+Countersign now exposes a packaged travel-agent SDK from the package root. The travel agent does not need to reimplement canonical JSON signing, relay request construction, or wallet receipt verification itself.
+
+From a separate repo today, install it directly from GitHub:
+
+```bash
+npm install github:WaltzOfWhispers/countersign
+```
+
+```js
+import { createCountersignClient } from 'countersign';
+
+const client = createCountersignClient({
+  baseUrl: 'https://wallet.example.com',
+  agentId: 'travel-agent',
+  privateKeyPem: process.env.COUNTERSIGN_AGENT_PRIVATE_KEY
+});
+
+const relayRequest = await client.enqueueAuthorizationRequest({
+  walletAccountId: 'user_123',
+  amount: { currency: 'USD', minor: 2450 },
+  bookingReference: 'trip_123',
+  memo: 'Flight booking charge'
+});
+
+const authorization = await client.getAuthorizationResult({
+  relayRequestId: relayRequest.relayRequestId
+});
+
+if (authorization.receipt.payload.status === 'approved') {
+  await client.captureAuthorizedCharge({
+    relayRequestId: relayRequest.relayRequestId
+  });
+}
+```
+
 ## Current Phase 1 Wedge
 
 This repository is intentionally narrow. It is not yet a general-purpose wallet for every agent and every rail. It is a proof of one opinionated loop: a remote travel agent business requests payment, a local wallet daemon authorizes it, and the business captures the charge only after receiving a wallet-signed receipt. In practice that means a local CLI or daemon wallet, a relay embedded in the MVP server, a remote travel agent backend as the requester, and a Stripe-style capture path after wallet authorization.
@@ -34,7 +71,7 @@ The purpose of this MVP is to validate the trust model before expanding into mob
 
 ## Integration Contract
 
-If you are implementing the remote travel agent side, the handoff contract is in [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md). It documents the request and response shapes, signing rules, onboarding assumptions, and the exact relay endpoints used in this MVP.
+If you are implementing the remote travel agent side, the handoff contract is in [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md). It documents the request and response shapes, signing rules, onboarding assumptions, and the SDK methods the travel agent should call in this MVP.
 
 ## Run It
 
@@ -80,7 +117,7 @@ npm run wallet:authorize -- --wallet <wallet-installation-id> --wallet-account-i
 
 ## Code Map
 
-The trust and relay flow lives primarily in [src/app.js](/Users/christycui/Documents/agent_wallet/src/app.js). The local wallet client is in [src/lib/wallet-daemon-client.js](/Users/christycui/Documents/agent_wallet/src/lib/wallet-daemon-client.js). The mocked payment rail lives in [src/lib/payment-rails.js](/Users/christycui/Documents/agent_wallet/src/lib/payment-rails.js). The end-to-end wedge is covered by [test/wallet-daemon.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon.integration.test.js) and [test/wallet-daemon-client.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon-client.integration.test.js).
+The trust and relay flow lives primarily in [src/app.js](/Users/christycui/Documents/agent_wallet/src/app.js). The packaged travel-agent SDK lives in [src/sdk/index.js](/Users/christycui/Documents/agent_wallet/src/sdk/index.js). The local wallet client is in [src/lib/wallet-daemon-client.js](/Users/christycui/Documents/agent_wallet/src/lib/wallet-daemon-client.js). The mocked payment rail lives in [src/lib/payment-rails.js](/Users/christycui/Documents/agent_wallet/src/lib/payment-rails.js). The end-to-end wedge is covered by [test/wallet-daemon.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon.integration.test.js), [test/wallet-daemon-client.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon-client.integration.test.js), and [test/countersign-sdk.integration.test.js](/Users/christycui/Documents/agent_wallet/test/countersign-sdk.integration.test.js).
 
 ## Notes
 

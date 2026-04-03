@@ -2,7 +2,20 @@
   "name": "countersign",
   "version": "0.1.0",
   "private": true,
+  "description": "Countersign travel-agent SDK for wallet authorization and capture flows.",
   "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "README.md",
+    "index.js",
+    "src/sdk/index.js",
+    "src/lib/canonical-json.js",
+    "src/lib/crypto.js",
+    "src/lib/http-client.js",
+    "src/lib/ids.js"
+  ],
   "scripts": {
     "start": "node src/server.js",
     "agent:install": "node src/cli/install-agent.js",

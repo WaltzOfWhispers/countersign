@@ -13,12 +13,26 @@ This is the contract to hand to the travel-agent coder.
 
 This flow is implemented in the MVP server and covered by integration tests.
 
+The recommended integration path is to use the packaged Countersign SDK:
+
+Install it from GitHub in the travel-agent repo:
+
+```bash
+npm install github:WaltzOfWhispers/countersign
+```
+
+```js
+import { createCountersignClient } from 'countersign';
+```
+
 Primary references:
 
 - [src/app.js](/Users/christycui/Documents/agent_wallet/src/app.js)
+- [src/sdk/index.js](/Users/christycui/Documents/agent_wallet/src/sdk/index.js)
 - [src/lib/wallet-daemon-client.js](/Users/christycui/Documents/agent_wallet/src/lib/wallet-daemon-client.js)
 - [test/wallet-daemon.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon.integration.test.js)
 - [test/wallet-daemon-client.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon-client.integration.test.js)
+- [test/countersign-sdk.integration.test.js](/Users/christycui/Documents/agent_wallet/test/countersign-sdk.integration.test.js)
 
 ## Roles
 
@@ -160,6 +174,15 @@ function canonicalJsonStringify(value) {
 The server signs and verifies using that exact canonicalization. The travel-agent coder must match it.
 
 ## Travel Agent API Contract
+
+The SDK wraps the raw HTTP contract below. In normal use, the travel-agent repo should call:
+
+- `createCountersignClient({ baseUrl, agentId, privateKeyPem })`
+- `enqueueAuthorizationRequest(...)`
+- `getAuthorizationResult(...)`
+- `captureAuthorizedCharge(...)`
+
+The rest of this section is the wire contract the SDK speaks.
 
 ### A. Enqueue a payment authorization request
 
@@ -440,13 +463,12 @@ At minimum:
 
 1. Hold a persistent Ed25519 keypair for the travel-agent backend.
 2. Know the user’s `walletAccountId`.
-3. Canonically JSON-serialize and sign outbound payloads.
-4. Implement these calls:
-   - `POST /api/relay/travel-agent/requests`
-   - `GET /api/relay/travel-agent/requests/:relayRequestId`
-   - `POST /api/relay/travel-agent/requests/:relayRequestId/capture`
-5. Verify the wallet authorization receipt before capture.
-6. Refuse capture if any signed fields do not match the original request.
+3. Instantiate the Countersign SDK with the relay base URL, `agentId`, and private key.
+4. Call:
+   - `enqueueAuthorizationRequest(...)`
+   - `getAuthorizationResult(...)`
+   - `captureAuthorizedCharge(...)`
+5. Refuse capture if the verified authorization fields do not match the original request.
 
 ## What Is Still Missing
 
@@ -460,17 +482,17 @@ These are known MVP gaps:
 
 ## Recommended Next Implementation Step For Travel Agent Repo
 
-Build a small relay client module with three functions:
+Create a small booking-facing adapter around the packaged Countersign SDK so the booking flow only needs to think in terms of:
 
-- `enqueueAuthorizationRequest`
-- `getAuthorizationResult`
-- `captureAuthorizedCharge`
+- request wallet authorization
+- wait for wallet approval
+- capture authorized charge
 
-That client should own:
+The SDK already owns:
 
 - canonical JSON serialization
 - Ed25519 signing
 - wallet receipt verification
-- field matching between original request and returned authorization
+- relay endpoint calling
 
-Then call that module from the booking flow instead of sprinkling relay logic across handlers.
+The travel-agent repo should still own field matching between the original booking request and the verified authorization result before capture.

@@ -1,0 +1,17 @@
+{
+  "name": "countersign",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "agent:install": "node src/cli/install-agent.js",
+    "agent:claim": "node src/cli/claim-agent.js",
+    "agent:pay": "node src/cli/request-payment.js",
+    "wallet:install": "node src/cli/install-wallet.js",
+    "wallet:claim": "node src/cli/claim-wallet.js",
+    "wallet:poll": "node src/cli/poll-wallet.js",
+    "wallet:authorize": "node src/cli/authorize-wallet.js",
+    "test": "node --test"
+  }
+}

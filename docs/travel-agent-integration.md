@@ -1,0 +1,476 @@
+# Travel Agent Integration Contract
+
+This document describes how the remote travel-agent backend talks to the user wallet in the current MVP wedge:
+
+- local wallet daemon
+- relay
+- remote travel-agent backend
+- Stripe-style capture after wallet authorization
+
+This is the contract to hand to the travel-agent coder.
+
+## Current Status
+
+This flow is implemented in the MVP server and covered by integration tests.
+
+Primary references:
+
+- [src/app.js](/Users/christycui/Documents/agent_wallet/src/app.js)
+- [src/lib/wallet-daemon-client.js](/Users/christycui/Documents/agent_wallet/src/lib/wallet-daemon-client.js)
+- [test/wallet-daemon.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon.integration.test.js)
+- [test/wallet-daemon-client.integration.test.js](/Users/christycui/Documents/agent_wallet/test/wallet-daemon-client.integration.test.js)
+
+## Roles
+
+- `wallet account`
+  The user-owned account in the wallet backend. This holds policy and balance.
+
+- `wallet installation`
+  The user’s local CLI/daemon install. It has its own Ed25519 keypair and signs wallet authorizations.
+
+- `travel agent backend`
+  The remote server-side business backend. It has its own Ed25519 keypair and signs relay requests.
+
+- `relay`
+  The message-routing layer inside the wallet server in this MVP. It verifies signatures, queues requests, and returns wallet-signed authorizations back to the travel agent.
+
+## Trust Model
+
+The travel agent does not talk directly to the user’s local daemon.
+
+The flow is:
+
+1. travel agent sends a signed authorization request to the relay
+2. wallet daemon polls relay and verifies the travel-agent signature
+3. wallet daemon signs an authorization receipt
+4. relay verifies the daemon signature and exposes the authorization result to the travel agent
+5. travel agent captures payment
+
+Important:
+
+- the relay does not sign wallet authorizations on behalf of the daemon
+- the wallet daemon signs its own authorization receipt
+- the travel agent signs its own enqueue and capture requests
+
+## Onboarding
+
+There are two separate onboarding paths.
+
+### 1. Wallet daemon onboarding
+
+The user:
+
+1. creates a wallet account in the dashboard
+2. generates a one-time claim token
+3. installs the local daemon and gets a local keypair
+4. claims the daemon to the wallet account
+
+Claim endpoint:
+
+- `POST /api/wallets/claim`
+
+Signed payload:
+
+```json
+{
+  "type": "wallet.claim.v1",
+  "requestId": "wallet_claim_req_1",
+  "walletInstallationId": "wallet_install_local_1",
+  "walletAccountId": "user_123",
+  "claimToken": "token_abc",
+  "walletPubkey": "-----BEGIN PUBLIC KEY----- ...",
+  "walletLabel": "CLI daemon",
+  "timestamp": "2026-04-03T19:00:00.000Z",
+  "nonce": "nonce_1"
+}
+```
+
+Response:
+
+```json
+{
+  "receipt": {
+    "payload": {
+      "type": "wallet.installation_receipt.v1",
+      "requestId": "wallet_claim_req_1",
+      "walletInstallationId": "wallet_install_local_1",
+      "walletAccountId": "user_123",
+      "status": "claimed",
+      "relayKeyId": "key_...",
+      "relayPubkey": "-----BEGIN PUBLIC KEY----- ...",
+      "claimedAt": "2026-04-03T19:00:01.000Z"
+    },
+    "signature": "<base64url signature from relay key>"
+  },
+  "walletInstallation": {
+    "id": "wallet_install_local_1",
+    "ownerUserId": "user_123",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY----- ...",
+    "label": "CLI daemon"
+  }
+}
+```
+
+### 2. Travel-agent backend onboarding
+
+Current MVP behavior:
+
+- the travel agent is pre-registered in server config as a trusted agent
+- the server is initialized with a `trustedAgents` map keyed by `agentId`
+- the travel agent must hold the private key matching the configured public key
+
+This is not yet self-serve.
+
+MVP assumption:
+
+- wallet account linking between the user and the travel agent happens out of band
+- the travel agent backend already knows the target `walletAccountId`
+
+This should be replaced later by an explicit user linking flow, but it is enough for the current MVP.
+
+## Signing Rules
+
+All signed payloads use:
+
+- `Ed25519`
+- canonical JSON with recursively sorted object keys
+- `base64url` encoded signatures
+
+Equivalent logic:
+
+```js
+function canonicalJsonStringify(value) {
+  function sortValue(input) {
+    if (Array.isArray(input)) return input.map(sortValue);
+    if (input && typeof input === "object") {
+      return Object.keys(input)
+        .sort()
+        .reduce((result, key) => {
+          result[key] = sortValue(input[key]);
+          return result;
+        }, {});
+    }
+    return input;
+  }
+
+  return JSON.stringify(sortValue(value));
+}
+```
+
+The server signs and verifies using that exact canonicalization. The travel-agent coder must match it.
+
+## Travel Agent API Contract
+
+### A. Enqueue a payment authorization request
+
+Endpoint:
+
+- `POST /api/relay/travel-agent/requests`
+
+Purpose:
+
+- submit a signed payment authorization request to the relay for a specific wallet account
+
+Required payload:
+
+```json
+{
+  "type": "travel.payment_authorization_request.v1",
+  "requestId": "travel_req_1",
+  "agentId": "travel-agent",
+  "walletAccountId": "user_123",
+  "amount": {
+    "currency": "USD",
+    "minor": 2450
+  },
+  "bookingReference": "trip_123",
+  "memo": "Flight booking charge",
+  "timestamp": "2026-04-03T19:10:00.000Z",
+  "nonce": "travel_nonce_1"
+}
+```
+
+Request body:
+
+```json
+{
+  "payload": {
+    "...": "..."
+  },
+  "signature": "<base64url signature using the travel-agent private key>"
+}
+```
+
+Successful response:
+
+```json
+{
+  "relayRequestId": "travel_req_1",
+  "walletInstallationId": "wallet_install_local_1",
+  "status": "pending_wallet"
+}
+```
+
+Meaning:
+
+- relay accepted the request
+- a claimed wallet installation exists for that wallet account
+- the request is now waiting for the wallet daemon
+
+### B. Retrieve wallet authorization result
+
+Endpoint:
+
+- `GET /api/relay/travel-agent/requests/:relayRequestId`
+
+Purpose:
+
+- read the current status of a relay request and fetch the wallet-signed authorization receipt
+
+Successful response after approval:
+
+```json
+{
+  "requestId": "travel_req_1",
+  "status": "authorized",
+  "receipt": {
+    "payload": {
+      "type": "wallet.travel_authorization.v1",
+      "relayRequestId": "travel_req_1",
+      "walletInstallationId": "wallet_install_local_1",
+      "walletAccountId": "user_123",
+      "agentId": "travel-agent",
+      "amount": {
+        "currency": "USD",
+        "minor": 2450
+      },
+      "bookingReference": "trip_123",
+      "status": "approved",
+      "reasonCode": "policy_passed",
+      "authorizedAt": "2026-04-03T19:10:30.000Z",
+      "nonce": "nonce_2"
+    },
+    "signature": "<base64url signature using the wallet daemon private key>"
+  },
+  "walletInstallation": {
+    "id": "wallet_install_local_1",
+    "ownerUserId": "user_123",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY----- ...",
+    "label": "CLI daemon"
+  }
+}
+```
+
+Travel-agent backend requirements:
+
+- verify the signature on `receipt.payload` using `walletInstallation.publicKeyPem`
+- only proceed to capture if:
+  - `status === "authorized"`
+  - `receipt.payload.status === "approved"`
+  - signature verification passes
+  - `walletAccountId`, `agentId`, `amount`, and `bookingReference` match the original request
+
+### C. Capture payment after authorization
+
+Endpoint:
+
+- `POST /api/relay/travel-agent/requests/:relayRequestId/capture`
+
+Purpose:
+
+- tell the wallet backend that the travel agent is now capturing the payment through the Stripe rail
+
+Required payload:
+
+```json
+{
+  "type": "travel.payment_capture.v1",
+  "relayRequestId": "travel_req_1",
+  "agentId": "travel-agent",
+  "timestamp": "2026-04-03T19:10:45.000Z",
+  "nonce": "travel_capture_nonce_1"
+}
+```
+
+Successful response:
+
+```json
+{
+  "charge": {
+    "id": "charge_...",
+    "provider": "mock_stripe_travel_charge",
+    "providerReference": "pi_...",
+    "status": "captured",
+    "amountCents": 2450,
+    "currency": "USD",
+    "walletAccountId": "user_123",
+    "agentId": "travel-agent",
+    "relayRequestId": "travel_req_1",
+    "createdAt": "2026-04-03T19:10:46.000Z"
+  },
+  "summary": {
+    "...": "updated wallet summary"
+  }
+}
+```
+
+Current MVP behavior:
+
+- balance is deducted at capture time
+- not at authorization time
+
+## Wallet Daemon API Contract
+
+The wallet daemon currently needs three behaviors.
+
+### A. Claim itself
+
+- `POST /api/wallets/claim`
+
+### B. Poll relay
+
+- `POST /api/relay/wallet-poll`
+
+Signed payload:
+
+```json
+{
+  "type": "wallet.relay_poll.v1",
+  "walletInstallationId": "wallet_install_local_1",
+  "timestamp": "2026-04-03T19:10:10.000Z",
+  "nonce": "nonce_3"
+}
+```
+
+Response:
+
+```json
+{
+  "walletInstallationId": "wallet_install_local_1",
+  "requests": [
+    {
+      "requestId": "travel_req_1",
+      "payload": {
+        "...": "travel authorization request payload"
+      },
+      "signature": "<base64url signature from travel agent>"
+    }
+  ]
+}
+```
+
+The daemon must verify the request signature using the travel agent public key known to the relay-backed system.
+
+### C. Submit authorization decision
+
+- `POST /api/relay/wallet-authorizations`
+
+Signed payload:
+
+```json
+{
+  "type": "wallet.travel_authorization.v1",
+  "relayRequestId": "travel_req_1",
+  "walletInstallationId": "wallet_install_local_1",
+  "walletAccountId": "user_123",
+  "agentId": "travel-agent",
+  "amount": {
+    "currency": "USD",
+    "minor": 2450
+  },
+  "bookingReference": "trip_123",
+  "status": "approved",
+  "reasonCode": "policy_passed",
+  "authorizedAt": "2026-04-03T19:10:30.000Z",
+  "nonce": "nonce_4"
+}
+```
+
+Request body:
+
+```json
+{
+  "payload": {
+    "...": "..."
+  },
+  "signature": "<base64url signature from wallet daemon>"
+}
+```
+
+The relay verifies that signature against the claimed wallet installation public key.
+
+## Sequence Diagram
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant W as Wallet Daemon
+  participant R as Relay/Wallet Backend
+  participant T as Travel Agent Backend
+  participant S as Stripe
+
+  U->>R: Create wallet account
+  U->>R: Generate claim token
+  W->>R: POST /api/wallets/claim (signed)
+  R-->>W: wallet.installation_receipt.v1 (relay-signed)
+
+  T->>R: POST /api/relay/travel-agent/requests (signed)
+  R-->>T: 202 pending_wallet
+
+  W->>R: POST /api/relay/wallet-poll (signed)
+  R-->>W: queued signed travel request
+
+  W->>W: Verify travel-agent signature
+  W->>W: Evaluate policy
+  W->>R: POST /api/relay/wallet-authorizations (signed)
+  R-->>W: accepted
+
+  T->>R: GET /api/relay/travel-agent/requests/:id
+  R-->>T: wallet-signed authorization receipt
+  T->>T: Verify wallet daemon signature
+
+  T->>R: POST /api/relay/travel-agent/requests/:id/capture (signed)
+  R->>S: Mock Stripe capture
+  R-->>T: capture result
+```
+
+## What The Travel Agent Coder Must Implement
+
+At minimum:
+
+1. Hold a persistent Ed25519 keypair for the travel-agent backend.
+2. Know the user’s `walletAccountId`.
+3. Canonically JSON-serialize and sign outbound payloads.
+4. Implement these calls:
+   - `POST /api/relay/travel-agent/requests`
+   - `GET /api/relay/travel-agent/requests/:relayRequestId`
+   - `POST /api/relay/travel-agent/requests/:relayRequestId/capture`
+5. Verify the wallet authorization receipt before capture.
+6. Refuse capture if any signed fields do not match the original request.
+
+## What Is Still Missing
+
+These are known MVP gaps:
+
+- no self-serve travel-agent registration yet
+- no explicit user-to-travel-agent linking screen yet
+- relay is polling, not a persistent daemon connection
+- capture uses a mock Stripe layer, not real Stripe APIs
+- replay protection is freshness-based plus request-id uniqueness, not a hardened distributed nonce service
+
+## Recommended Next Implementation Step For Travel Agent Repo
+
+Build a small relay client module with three functions:
+
+- `enqueueAuthorizationRequest`
+- `getAuthorizationResult`
+- `captureAuthorizedCharge`
+
+That client should own:
+
+- canonical JSON serialization
+- Ed25519 signing
+- wallet receipt verification
+- field matching between original request and returned authorization
+
+Then call that module from the booking flow instead of sprinkling relay logic across handlers.

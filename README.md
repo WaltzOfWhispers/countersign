@@ -6,26 +6,56 @@ Most "agent wallets" today answer the custody question before they answer the id
 
 Countersign is built around that gap. The travel agent signs the payment request. The user-run wallet daemon verifies the requester, checks local policy, and signs the authorization itself. The relay only routes messages. It does not become the trust anchor, and it does not sign on the wallet's behalf.
 
-## Why This Exists
+## MCP Setup
 
-API keys and session tokens are good enough for many integrations, but they are weak foundations for autonomous spending. They identify an application session, not the specific actor asking to move money right now. That distinction matters once an agent can trigger charges without a human clicking through every payment flow.
+Countersign also includes a local MCP server so Claude can perform wallet actions directly. The MCP server talks to the same Countersign data store and local wallet installation files, so Claude can create wallets, generate claim tokens, install and claim local wallet identities, inspect pending requests, and approve or reject them.
 
-Countersign takes the position that an agent payment system should be explicit about who is requesting spend, who is approving it, and what cryptographic proof exists on both sides. The point is not to add more wallet UX. The point is to make agent-initiated payments legible and verifiable.
+From the Countersign repo, start it with:
 
-## How It Works
+```bash
+npm run mcp:start
+```
 
-In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. Only after that receipt exists does the travel agent capture payment through the Stripe rail.
+Then replace `/absolute/path/to/countersign` below and paste this prompt into Claude:
 
-That means the approval path is anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
+```text
+Please add a local MCP server named "countersign" with:
 
-## Choose A Surface
+- command: npm
+- args: run mcp:start
+- cwd: /absolute/path/to/countersign
 
-Countersign currently exposes two integration surfaces:
+After installation, confirm these tools are available:
+- create_wallet
+- get_wallet
+- fund_wallet
+- set_wallet_policy
+- generate_claim_token
+- install_wallet_daemon
+- claim_wallet_daemon
+- list_pending_wallet_requests
+- review_wallet_request
+```
 
-- a packaged SDK for a remote travel agent or any server-side business backend
-- a local MCP server so Claude can act on behalf of the wallet owner
+The MCP server exposes these wallet tools:
 
-Use the SDK when your separate travel agent service needs to request authorization and capture charges. Use the MCP server when you want to talk to Claude and have Claude create wallets, install or claim the local daemon, inspect pending requests, and approve or reject them.
+- `create_wallet`
+- `get_wallet`
+- `fund_wallet`
+- `set_wallet_policy`
+- `generate_claim_token`
+- `install_wallet_daemon`
+- `claim_wallet_daemon`
+- `list_pending_wallet_requests`
+- `review_wallet_request`
+
+If you want the MCP server to use a different store location, set:
+
+- `COUNTERSIGN_DATA_FILE`
+- `COUNTERSIGN_WALLET_DIR`
+- `COUNTERSIGN_TRUSTED_AGENTS_JSON` for local testing with known travel-agent keys
+
+The MCP-specific setup doc is in [docs/mcp-server.md](/Users/christycui/Documents/agent_wallet/docs/mcp-server.md).
 
 ## SDK Setup
 
@@ -72,49 +102,17 @@ if (authorization.receipt.payload.status === 'approved') {
 
 The full travel-agent handoff contract is in [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md).
 
-## MCP Setup
+## Why This Exists
 
-Countersign also includes a local MCP server so Claude can perform wallet actions directly. The MCP server talks to the same Countersign data store and local wallet installation files, so Claude can create wallets, generate claim tokens, install and claim local wallet identities, inspect pending requests, and approve or reject them.
+API keys and session tokens are good enough for many integrations, but they are weak foundations for autonomous spending. They identify an application session, not the specific actor asking to move money right now. That distinction matters once an agent can trigger charges without a human clicking through every payment flow.
 
-From the Countersign repo, start it with:
+Countersign takes the position that an agent payment system should be explicit about who is requesting spend, who is approving it, and what cryptographic proof exists on both sides. The point is not to add more wallet UX. The point is to make agent-initiated payments legible and verifiable.
 
-```bash
-npm run mcp:start
-```
+## How It Works
 
-Then point Claude at it with an MCP config like this:
+In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. Only after that receipt exists does the travel agent capture payment through the Stripe rail.
 
-```json
-{
-  "mcpServers": {
-    "countersign": {
-      "command": "npm",
-      "args": ["run", "mcp:start"],
-      "cwd": "/Users/christycui/Documents/agent_wallet"
-    }
-  }
-}
-```
-
-The MCP server exposes these wallet tools:
-
-- `create_wallet`
-- `get_wallet`
-- `fund_wallet`
-- `set_wallet_policy`
-- `generate_claim_token`
-- `install_wallet_daemon`
-- `claim_wallet_daemon`
-- `list_pending_wallet_requests`
-- `review_wallet_request`
-
-If you want the MCP server to use a different store location, set:
-
-- `COUNTERSIGN_DATA_FILE`
-- `COUNTERSIGN_WALLET_DIR`
-- `COUNTERSIGN_TRUSTED_AGENTS_JSON` for local testing with known travel-agent keys
-
-The MCP-specific setup doc is in [docs/mcp-server.md](/Users/christycui/Documents/agent_wallet/docs/mcp-server.md).
+That means the approval path is anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
 ## Current Phase 1 Wedge
 

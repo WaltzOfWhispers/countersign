@@ -61,6 +61,11 @@ Add Countersign to Claude Desktop in:
 
 `~/Library/Application Support/Claude/claude_desktop_config.json`
 
+Replace both paths below with your own local paths:
+
+- `/Users/yourname/Documents/agent_wallet`
+- `/Users/yourname/.nvm/versions/node/v24.11.1/bin/node`
+
 ```json
 {
   "mcpServers": {
@@ -68,7 +73,7 @@ Add Countersign to Claude Desktop in:
       "command": "/bin/bash",
       "args": [
         "-c",
-        "cd /Users/christycui/Documents/agent_wallet && /Users/christycui/.nvm/versions/node/v24.11.1/bin/node src/mcp/server.js"
+        "cd /Users/yourname/Documents/agent_wallet && /Users/yourname/.nvm/versions/node/v24.11.1/bin/node src/mcp/server.js"
       ]
     }
   }
@@ -143,5 +148,5 @@ const result = await client.getAuthorizationResult({
 
 ## More Detail
 
-- MCP setup: [docs/mcp-server.md](/Users/christycui/Documents/agent_wallet/docs/mcp-server.md)
-- Remote agent integration: [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md)
+- MCP setup: [docs/mcp-server.md](./docs/mcp-server.md)
+- Remote agent integration: [docs/travel-agent-integration.md](./docs/travel-agent-integration.md)

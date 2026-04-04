@@ -152,7 +152,7 @@ Claude Desktop does not load your shell profile, so tools installed via version 
    - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
    - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
-3. Add the countersign server to the `mcpServers` object. For this repo on your machine, use:
+3. Add the countersign server to the `mcpServers` object. Replace the repo path and node path with your own local paths:
 
    ```json
    {
@@ -161,7 +161,7 @@ Claude Desktop does not load your shell profile, so tools installed via version 
           "command": "/bin/bash",
           "args": [
             "-c",
-            "cd /Users/christycui/Documents/agent_wallet && /Users/christycui/.nvm/versions/node/v24.11.1/bin/node src/mcp/server.js"
+            "cd /Users/yourname/Documents/agent_wallet && /Users/yourname/.nvm/versions/node/v24.11.1/bin/node src/mcp/server.js"
           ]
         }
       }

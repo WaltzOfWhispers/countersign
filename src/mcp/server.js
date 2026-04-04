@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { createCountersignControlPlane } from './control-plane.js';
+import { loadEnvFile } from '../lib/env-file.js';
 
 const SERVER_INFO = {
   name: 'countersign-mcp',
@@ -33,6 +34,7 @@ export function resolveMcpServerPaths({
 } = {}) {
   const projectRoot = projectRootFromImportMeta(importMetaUrl);
   const baseDir = projectRoot || cwd;
+  loadEnvFile({ env, baseDir });
 
   return {
     dataFile: env.COUNTERSIGN_DATA_FILE || join(baseDir, 'data', 'store.json'),

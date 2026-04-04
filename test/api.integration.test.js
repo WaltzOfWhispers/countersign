@@ -120,6 +120,20 @@ test('wallet can be created and funded through the public API', async () => {
   }
 });
 
+test('wallet exposes a default USDC balance and Ethereum address through the public API', async () => {
+  const harness = await createWalletHarness();
+
+  try {
+    const wallet = await harness.request(`/api/users/${harness.userId}`);
+
+    assert.equal(wallet.status, 200);
+    assert.equal(wallet.data.wallet.usdcBalanceBaseUnits, 0);
+    assert.match(wallet.data.wallet.evmAddress, /^0x[a-f0-9]{40}$/);
+  } finally {
+    await harness.close();
+  }
+});
+
 test('agent claim returns a wallet-signed receipt and binds the installation to the wallet', async () => {
   const harness = await createWalletHarness();
 

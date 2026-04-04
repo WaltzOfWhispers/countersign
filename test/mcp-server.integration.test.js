@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 import { createAgentWalletApp } from '../src/app.js';
-import { generateEd25519Keypair, signPayload, verifyPayload } from '../src/lib/crypto.js';
+import { generateEd25519Keypair, signPayload } from '../src/lib/crypto.js';
 
 function createMcpClient({ env }) {
   const child = spawn('node', ['src/mcp/server.js'], {
@@ -197,7 +197,7 @@ test('Countersign MCP tools can create, install, and claim a local wallet daemon
   }
 });
 
-test('Countersign MCP tools can list and approve pending travel-agent requests', async () => {
+test('Countersign MCP tools can list pending travel-agent requests and surface approval failures without a linked card', async () => {
   const rootDir = await mkdtemp(join(tmpdir(), 'countersign-mcp-review-test-'));
   const travelAgentKeys = generateEd25519Keypair();
   const trustedAgents = {
@@ -234,14 +234,6 @@ test('Countersign MCP tools can list and approve pending travel-agent requests',
       }
     });
     const walletAccountId = created.result.structuredContent.user.id;
-
-    await client.request('tools/call', {
-      name: 'fund_wallet',
-      arguments: {
-        walletAccountId,
-        amountUsd: 50
-      }
-    });
 
     const claimTokenResponse = await client.request('tools/call', {
       name: 'generate_claim_token',
@@ -318,8 +310,8 @@ test('Countersign MCP tools can list and approve pending travel-agent requests',
       }
     });
 
-    assert.equal(review.result.structuredContent.status, 'authorized');
-    assert.equal(review.result.structuredContent.execution, null);
+    assert.equal(review.result.isError, true);
+    assert.match(review.result.content[0].text, /insufficient_funds/);
 
     const agentView = await app.routeRequest({
       method: 'GET',
@@ -327,16 +319,9 @@ test('Countersign MCP tools can list and approve pending travel-agent requests',
     });
 
     assert.equal(agentView.statusCode, 200);
-    assert.equal(agentView.payload.status, 'authorized');
+    assert.equal(agentView.payload.status, 'pending_wallet');
     assert.equal(agentView.payload.execution, null);
-    assert.equal(
-      verifyPayload(
-        agentView.payload.receipt.payload,
-        agentView.payload.receipt.signature,
-        agentView.payload.walletInstallation.publicKeyPem
-      ),
-      true
-    );
+    assert.equal(agentView.payload.receipt, null);
   } finally {
     await client.close();
   }

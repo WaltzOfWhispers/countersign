@@ -9,6 +9,7 @@ import { generateEd25519Keypair, signPayload } from '../src/lib/crypto.js';
 
 function createFakeStripeGateway() {
   const calls = [];
+  let paymentMethodSequence = 0;
 
   return {
     enabled: true,
@@ -47,26 +48,28 @@ function createFakeStripeGateway() {
     },
     async getPaymentMethodForSetupIntent({ setupIntentId }) {
       calls.push({ type: 'getPaymentMethodForSetupIntent', setupIntentId });
+      paymentMethodSequence += 1;
       return {
         provider: 'stripe_payment_method',
         customerId: 'cus_wallet_stripe_1',
-        paymentMethodId: 'pm_wallet_stripe_1',
+        paymentMethodId: `pm_wallet_stripe_${paymentMethodSequence}`,
         setupIntentId,
         cardBrand: 'visa',
-        cardLast4: '4242',
+        cardLast4: String(4241 + paymentMethodSequence),
         expMonth: 12,
         expYear: 2030
       };
     },
     async getPaymentMethodForSetupSession({ checkoutSessionId }) {
       calls.push({ type: 'getPaymentMethodForSetupSession', checkoutSessionId });
+      paymentMethodSequence += 1;
       return {
         provider: 'stripe_payment_method',
         customerId: 'cus_wallet_stripe_1',
-        paymentMethodId: 'pm_wallet_stripe_1',
+        paymentMethodId: `pm_wallet_stripe_${paymentMethodSequence}`,
         setupIntentId: `seti_from_${checkoutSessionId}`,
         cardBrand: 'visa',
-        cardLast4: '4242',
+        cardLast4: String(4241 + paymentMethodSequence),
         expMonth: 12,
         expYear: 2030
       };
@@ -244,6 +247,62 @@ test('funding API can start a hosted Stripe setup session and sync the linked pa
   assert.equal(
     harness.stripeGateway.calls.some((call) => call.type === 'getPaymentMethodForSetupSession'),
     true
+  );
+});
+
+test('funding API preserves multiple linked Stripe cards and marks the latest card active', async () => {
+  const harness = await createHarness();
+
+  const firstSetupIntent = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${harness.walletInstallationId}/stripe/setup-intent`,
+    {
+      method: 'POST'
+    }
+  );
+  assert.equal(firstSetupIntent.status, 201);
+
+  const firstLinked = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${harness.walletInstallationId}/payment-method/stripe`,
+    {
+      method: 'POST',
+      body: {
+        setupIntentId: firstSetupIntent.data.setupIntentId
+      }
+    }
+  );
+  assert.equal(firstLinked.status, 200);
+
+  const secondSetupIntent = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${harness.walletInstallationId}/stripe/setup-intent`,
+    {
+      method: 'POST'
+    }
+  );
+  assert.equal(secondSetupIntent.status, 201);
+
+  const secondLinked = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${harness.walletInstallationId}/payment-method/stripe`,
+    {
+      method: 'POST',
+      body: {
+        setupIntentId: secondSetupIntent.data.setupIntentId
+      }
+    }
+  );
+
+  assert.equal(secondLinked.status, 200);
+  assert.equal(secondLinked.data.walletInstallation.paymentMethods.length, 2);
+  assert.equal(secondLinked.data.walletInstallation.paymentMethods[0].paymentMethodId, 'pm_wallet_stripe_1');
+  assert.equal(secondLinked.data.walletInstallation.paymentMethods[1].paymentMethodId, 'pm_wallet_stripe_2');
+  assert.equal(secondLinked.data.walletInstallation.activePaymentMethodId, 'pm_wallet_stripe_2');
+  assert.equal(secondLinked.data.walletInstallation.paymentMethod.paymentMethodId, 'pm_wallet_stripe_2');
+  assert.equal(
+    secondLinked.data.dashboard.localWalletInstallations[0].paymentMethods.length,
+    2
+  );
+  assert.equal(
+    secondLinked.data.dashboard.localWalletInstallations[0].paymentMethod.paymentMethodId,
+    'pm_wallet_stripe_2'
   );
 });
 

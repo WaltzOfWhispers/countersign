@@ -106,6 +106,36 @@ h2 {
   box-shadow: var(--shadow);
 }
 
+.banner.error {
+  border-color: rgba(143, 35, 35, 0.16);
+  background: rgba(255, 248, 248, 0.82);
+  color: #8f2323;
+}
+
+.banner-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.banner-close-button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0.1rem 0.2rem;
+}
+
+.banner-close-button:hover {
+  opacity: 1;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
@@ -202,6 +232,11 @@ h2 {
   gap: 0.8rem;
 }
 
+.inline-select {
+  display: grid;
+  gap: 0.45rem;
+}
+
 .inline-form {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
@@ -218,6 +253,12 @@ h2 {
 .stripe-payment-form {
   display: grid;
   gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.funding-actions {
+  display: flex;
+  gap: 0.75rem;
   margin-top: 1rem;
 }
 
@@ -347,6 +388,12 @@ select:focus {
   color: var(--muted);
 }
 
+.callout.error {
+  color: #8f2323;
+  border-color: rgba(143, 35, 35, 0.16);
+  background: rgba(255, 248, 248, 0.82);
+}
+
 .list {
   display: grid;
   gap: 0.75rem;
@@ -355,6 +402,11 @@ select:focus {
 .list-card {
   display: grid;
   gap: 0.65rem;
+}
+
+.payment-method-card strong {
+  display: block;
+  line-height: 1.35;
 }
 
 .row {
@@ -368,6 +420,18 @@ select:focus {
 .meta {
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.address-value {
+  margin: 0;
+  padding: 0.8rem 0.95rem;
+  border-radius: 16px;
+  background: rgba(27, 37, 42, 0.05);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
 }
 
 .amount {
@@ -633,7 +697,12 @@ select:focus {
   }
 
   .hero-actions,
-  .button {
+  .button,
+  .funding-actions {
     width: 100%;
+  }
+
+  .banner-content {
+    align-items: flex-start;
   }
 }

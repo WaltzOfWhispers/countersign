@@ -46,16 +46,28 @@ export function createLocalWalletControlPlane({ send, walletDir, executeCharge }
     expMonth = 12,
     expYear = 2030
   }) {
+    const nextPaymentMethod =
+      paymentMethod ||
+      createMockStripePaymentMethod({
+        cardBrand,
+        cardLast4,
+        expMonth,
+        expYear
+      });
+
     const result = await walletStore.updateWalletInstallation(walletInstallationId, (installation) => ({
       ...installation,
-      paymentMethod:
-        paymentMethod ||
-        createMockStripePaymentMethod({
-          cardBrand,
-          cardLast4,
-          expMonth,
-          expYear
-        })
+      paymentMethods: [
+        ...(installation.paymentMethods || []).filter(
+          (existingPaymentMethod) =>
+            existingPaymentMethod.paymentMethodId !== nextPaymentMethod.paymentMethodId
+        ),
+        nextPaymentMethod
+      ],
+      activePaymentMethodId:
+        nextPaymentMethod.paymentMethodId ||
+        installation.paymentMethod?.paymentMethodId ||
+        null
     }));
 
     return {
@@ -152,7 +164,8 @@ export function createLocalWalletControlPlane({ send, walletDir, executeCharge }
     walletAccountId,
     relayRequestId,
     decision,
-    reasonCode
+    reasonCode,
+    paymentMethodId
   }) {
     const { installation } = await walletStore.loadWalletInstallation(walletInstallationId);
     const poll = await walletClient.pollRequests({ installation });
@@ -162,8 +175,24 @@ export function createLocalWalletControlPlane({ send, walletDir, executeCharge }
       throw new Error(`Relay request ${relayRequestId} was not found in the pending queue.`);
     }
 
+    let selectedInstallation = installation;
+    if (paymentMethodId) {
+      const selectedPaymentMethod = (installation.paymentMethods || []).find(
+        (paymentMethod) => paymentMethod.paymentMethodId === paymentMethodId
+      );
+
+      if (!selectedPaymentMethod) {
+        throw new Error(`Payment method ${paymentMethodId} was not found on this local wallet runtime.`);
+      }
+
+      selectedInstallation = {
+        ...installation,
+        paymentMethod: selectedPaymentMethod
+      };
+    }
+
     return walletClient.authorizeRequest({
-      installation,
+      installation: selectedInstallation,
       relayRequest,
       walletAccountId,
       status: decision === 'reject' ? 'rejected' : 'approved',
@@ -199,6 +228,8 @@ export function createLocalWalletControlPlane({ send, walletDir, executeCharge }
           ownerUserId: claimedInstallation?.ownerUserId || null,
           claimedAt: claimedInstallation?.claimedAt || null,
           paymentMethod: installation.paymentMethod || null,
+          paymentMethods: installation.paymentMethods || [],
+          activePaymentMethodId: installation.activePaymentMethodId || null,
           pendingRequests
         };
       })

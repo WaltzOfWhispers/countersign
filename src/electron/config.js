@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadEnvFile } from '../lib/env-file.js';
 
 function projectRootFromImportMeta(importMetaUrl = import.meta.url) {
   return dirname(dirname(dirname(fileURLToPath(importMetaUrl))));
@@ -12,6 +13,7 @@ export function resolveElectronAppConfig({
 } = {}) {
   const projectRoot = projectRootFromImportMeta(importMetaUrl);
   const baseDir = projectRoot || cwd;
+  loadEnvFile({ env, baseDir });
   const port = Number(env.COUNTERSIGN_ELECTRON_PORT || env.PORT || 3210);
 
   return {

@@ -66,7 +66,19 @@
       </aside>
 
       <main class="desktop-workspace">
-        <div id="banner" class="banner" hidden></div>
+        <div id="banner" class="banner" hidden>
+          <div class="banner-content">
+            <span id="banner-message"></span>
+            <button
+              id="banner-close-button"
+              class="banner-close-button"
+              type="button"
+              aria-label="Dismiss notification"
+            >
+              ×
+            </button>
+          </div>
+        </div>
 
         <div class="desktop-panels">
           <section id="home-panel" class="tab-panel active">
@@ -167,16 +179,20 @@
                   <div class="panel-header">
                     <div>
                       <p class="panel-kicker">Funding</p>
-                      <h2>How this wallet charges</h2>
+                      <h2>Crypto</h2>
                     </div>
                   </div>
 
                   <div class="callout">
-                    <strong>No USD wallet balance</strong>
-                    <p class="meta">
-                      Countersign does not custody a stored USD balance. Instead, approved travel-agent
-                      requests charge the Stripe card linked to this local agent wallet runtime.
-                    </p>
+                    <div class="row">
+                      <div>
+                        <strong>USDC balance</strong>
+                        <p class="meta">Default stablecoin wallet for agent-native payment rails.</p>
+                      </div>
+                      <span id="funding-usdc-balance" class="pill subtle">0.00 USDC</span>
+                    </div>
+                    <p class="meta">Ethereum address</p>
+                    <p id="funding-evm-address" class="address-value">Load a wallet to see the default address.</p>
                   </div>
                 </article>
               </section>
@@ -185,8 +201,8 @@
                 <article class="panel">
                   <div class="panel-header">
                     <div>
-                      <p class="panel-kicker">Payment method</p>
-                      <h2>Link card with Stripe</h2>
+                      <p class="panel-kicker">Funding</p>
+                      <h2>Credit cards</h2>
                     </div>
                   </div>
 
@@ -195,17 +211,34 @@
                     agent wallet for wallet-side charges.
                   </p>
 
-                  <div id="stripe-config-status" class="callout muted">
+                  <div class="callout muted">
+                    <strong>Your card will not be charged during setup.</strong>
+                    <p class="meta">
+                      Card details are collected securely by Stripe and are not stored by Countersign.
+                    </p>
+                  </div>
+
+                  <div id="stripe-config-status" class="callout muted" hidden>
                     Checking local Stripe configuration.
                   </div>
 
                   <div id="funding-payment-method-summary" class="callout muted">
-                    No Stripe payment method linked yet.
+                    No Stripe cards linked yet.
                   </div>
 
-                  <button id="create-stripe-setup-button" class="button secondary" type="button">
-                    Set Up Card with Stripe
-                  </button>
+                  <div id="linked-payment-methods-list" class="list empty">
+                    No Stripe cards linked yet.
+                  </div>
+
+                  <div id="funding-actions" class="funding-actions">
+                    <button id="create-stripe-setup-button" class="button secondary" type="button">
+                      Add Card with Stripe
+                    </button>
+                  </div>
+
+                  <div id="stripe-payment-status" class="callout muted" hidden>
+                    Start card setup to load Stripe's secure card form.
+                  </div>
 
                   <form id="stripe-payment-form" class="stripe-payment-form" hidden>
                     <div id="stripe-payment-element" class="stripe-payment-element"></div>

@@ -108,6 +108,9 @@ test('local dashboard API can install, link, claim, and list a wallet daemon', a
   assert.equal(updatedPolicy.status, 200);
 
   const { walletInstallationId } = await installLinkedClaimedWallet(harness);
+  const beforeSecondCard = await harness.request(`/api/users/${harness.walletAccountId}/local-dashboard`);
+  const firstPaymentMethodId =
+    beforeSecondCard.data.localWalletInstallations[0].paymentMethods[0].paymentMethodId;
 
   const dashboard = await harness.request(`/api/users/${harness.walletAccountId}/local-dashboard`);
 
@@ -283,4 +286,82 @@ test('local dashboard API can approve a travel-agent request and show the wallet
   assert.equal(agentView.status, 200);
   assert.equal(agentView.data.status, 'charged');
   assert.equal(agentView.data.execution.provider, 'mock_stripe_wallet_charge');
+});
+
+test('local dashboard API can approve a travel-agent request with a selected saved card', async () => {
+  const travelAgentKeys = generateEd25519Keypair();
+  const harness = await createHarness({
+    trustedAgents: {
+      'travel-agent': {
+        id: 'travel-agent',
+        publicKeyPem: travelAgentKeys.publicKeyPem
+      }
+    }
+  });
+
+  const { walletInstallationId } = await installLinkedClaimedWallet(harness);
+  const beforeSecondCard = await harness.request(`/api/users/${harness.walletAccountId}/local-dashboard`);
+  const firstPaymentMethodId =
+    beforeSecondCard.data.localWalletInstallations[0].paymentMethods[0].paymentMethodId;
+
+  const secondCard = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${walletInstallationId}/payment-method`,
+    {
+      method: 'POST',
+      body: {
+        cardBrand: 'mastercard',
+        cardLast4: '5454',
+        expMonth: 8,
+        expYear: 2031
+      }
+    }
+  );
+  assert.equal(secondCard.status, 200);
+
+  const relayPayload = {
+    type: 'travel.payment_authorization_request.v1',
+    requestId: 'travel_req_dashboard_card_choice_1',
+    agentId: 'travel-agent',
+    walletAccountId: harness.walletAccountId,
+    amount: {
+      currency: 'USD',
+      minor: 2450
+    },
+    bookingReference: 'trip_dashboard_card_choice_1',
+    memo: 'Flight booking charge',
+    timestamp: new Date().toISOString(),
+    nonce: 'travel_nonce_dashboard_card_choice_1'
+  };
+
+  const enqueued = await harness.request('/api/relay/travel-agent/requests', {
+    method: 'POST',
+    body: {
+      payload: relayPayload,
+      signature: signPayload(relayPayload, travelAgentKeys.privateKeyPem)
+    }
+  });
+  assert.equal(enqueued.status, 202);
+
+  const review = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${walletInstallationId}/requests/${relayPayload.requestId}/review`,
+    {
+      method: 'POST',
+      body: {
+        decision: 'approve',
+        paymentMethodId: firstPaymentMethodId
+      }
+    }
+  );
+
+  assert.equal(review.status, 200);
+  assert.equal(review.data.result.status, 'charged');
+  assert.equal(review.data.result.execution.provider, 'mock_stripe_wallet_charge');
+  assert.equal(review.data.result.execution.paymentMethodId, firstPaymentMethodId);
+  assert.equal(review.data.result.execution.cardLast4, '4242');
+
+  const agentView = await harness.request(`/api/relay/travel-agent/requests/${relayPayload.requestId}`);
+  assert.equal(agentView.status, 200);
+  assert.equal(agentView.data.status, 'charged');
+  assert.equal(agentView.data.execution.paymentMethodId, firstPaymentMethodId);
+  assert.equal(agentView.data.execution.cardLast4, '4242');
 });

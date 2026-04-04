@@ -2,6 +2,8 @@ const storageKey = 'countersign-user-id';
 
 const elements = {
   banner: document.querySelector('#banner'),
+  bannerMessage: document.querySelector('#banner-message'),
+  bannerCloseButton: document.querySelector('#banner-close-button'),
   walletId: document.querySelector('#wallet-id'),
   walletSummary: document.querySelector('#wallet-summary'),
   existingWalletSelect: document.querySelector('#existing-wallet-select'),
@@ -17,8 +19,13 @@ const elements = {
   createWalletForm: document.querySelector('#create-wallet-form'),
   walletName: document.querySelector('#wallet-name'),
   stripeConfigStatus: document.querySelector('#stripe-config-status'),
+  fundingUsdcBalance: document.querySelector('#funding-usdc-balance'),
+  fundingEvmAddress: document.querySelector('#funding-evm-address'),
   fundingPaymentMethodSummary: document.querySelector('#funding-payment-method-summary'),
+  linkedPaymentMethodsList: document.querySelector('#linked-payment-methods-list'),
+  fundingActions: document.querySelector('#funding-actions'),
   createStripeSetupButton: document.querySelector('#create-stripe-setup-button'),
+  stripePaymentStatus: document.querySelector('#stripe-payment-status'),
   stripePaymentForm: document.querySelector('#stripe-payment-form'),
   stripePaymentElement: document.querySelector('#stripe-payment-element'),
   walletInstallationsList: document.querySelector('#wallet-installations-list'),
@@ -55,6 +62,13 @@ function formatUsd(cents) {
   }).format((cents || 0) / 100);
 }
 
+function formatUsdc(baseUnits) {
+  return `${new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format((baseUnits || 0) / 1_000_000)} USDC`;
+}
+
 function dollarsToCents(value) {
   return Math.round(Number(value) * 100);
 }
@@ -63,6 +77,22 @@ function claimedRuntime() {
   return (
     state.localWalletInstallations.find((installation) => installation.claimStatus === 'claimed') || null
   );
+}
+
+function linkedPaymentMethodsForRuntime(runtime) {
+  if (!runtime) {
+    return [];
+  }
+
+  if (Array.isArray(runtime.paymentMethods) && runtime.paymentMethods.length) {
+    return runtime.paymentMethods;
+  }
+
+  return runtime.paymentMethod ? [runtime.paymentMethod] : [];
+}
+
+function formatPaymentMethodLabel(paymentMethod) {
+  return `${paymentMethod.cardBrand.toUpperCase()} •••• ${paymentMethod.cardLast4} expires ${String(paymentMethod.expMonth).padStart(2, '0')}/${paymentMethod.expYear}`;
 }
 
 async function requestJson(url, { method = 'GET', body } = {}) {
@@ -83,13 +113,27 @@ async function requestJson(url, { method = 'GET', body } = {}) {
 function setBanner(message, mode = 'info') {
   if (!message) {
     elements.banner.hidden = true;
-    elements.banner.textContent = '';
+    elements.bannerMessage.textContent = '';
+    elements.banner.classList.remove('error');
     return;
   }
 
   elements.banner.hidden = false;
-  elements.banner.textContent = message;
-  elements.banner.style.color = mode === 'error' ? '#8f2323' : '#1b252a';
+  elements.bannerMessage.textContent = message;
+  elements.banner.classList.toggle('error', mode === 'error');
+}
+
+function setStripePaymentStatus(message, mode = 'muted') {
+  if (!message) {
+    elements.stripePaymentStatus.hidden = true;
+    elements.stripePaymentStatus.textContent = '';
+    elements.stripePaymentStatus.className = 'callout muted';
+    return;
+  }
+
+  elements.stripePaymentStatus.hidden = false;
+  elements.stripePaymentStatus.textContent = message;
+  elements.stripePaymentStatus.className = mode === 'error' ? 'callout error' : `callout ${mode}`;
 }
 
 function renderWalletCatalog() {
@@ -124,6 +168,7 @@ function renderWalletSummary() {
 
   const { summary } = state;
   const runtime = claimedRuntime();
+  const paymentMethods = linkedPaymentMethodsForRuntime(runtime);
   const linkedCard = runtime?.paymentMethod
     ? `${runtime.paymentMethod.cardBrand.toUpperCase()} •••• ${runtime.paymentMethod.cardLast4}`
     : 'No card linked';
@@ -139,10 +184,21 @@ function renderWalletSummary() {
       <span class="metric-value">${linkedCard}</span>
     </div>
     <div class="metric">
-      <span class="metric-label">Claimed runtimes</span>
-      <span class="metric-value">${summary.walletInstallations.length}</span>
+      <span class="metric-label">Saved cards</span>
+      <span class="metric-value">${paymentMethods.length}</span>
     </div>
   `;
+}
+
+function renderFundingOverview() {
+  if (!state.summary) {
+    elements.fundingUsdcBalance.textContent = '0.00 USDC';
+    elements.fundingEvmAddress.textContent = 'Load a wallet to see the default address.';
+    return;
+  }
+
+  elements.fundingUsdcBalance.textContent = formatUsdc(state.summary.wallet.usdcBalanceBaseUnits);
+  elements.fundingEvmAddress.textContent = state.summary.wallet.evmAddress;
 }
 
 function renderPolicy() {
@@ -244,7 +300,7 @@ function renderRuntime() {
       </div>
       <p class="meta">${
         runtime.paymentMethod
-          ? `${runtime.paymentMethod.cardBrand.toUpperCase()} •••• ${runtime.paymentMethod.cardLast4} expires ${String(runtime.paymentMethod.expMonth).padStart(2, '0')}/${runtime.paymentMethod.expYear}`
+          ? `${linkedPaymentMethodsForRuntime(runtime).length} saved card(s) · Active: ${formatPaymentMethodLabel(runtime.paymentMethod)}`
           : 'No payment method linked yet.'
       }</p>
       <p class="meta">${runtime.pendingRequests.length} pending request(s)</p>
@@ -254,28 +310,79 @@ function renderRuntime() {
 
 function renderFundingPaymentMethod() {
   const runtime = claimedRuntime();
+  const paymentMethods = linkedPaymentMethodsForRuntime(runtime);
   const paymentMethod = runtime?.paymentMethod || null;
+
+  if (!runtime) {
+    elements.fundingPaymentMethodSummary.className = 'callout muted';
+    elements.fundingPaymentMethodSummary.textContent =
+      'Load a wallet to attach Stripe cards to the local agent wallet runtime.';
+    elements.linkedPaymentMethodsList.className = 'list empty';
+    elements.linkedPaymentMethodsList.textContent = 'No local runtime available yet.';
+    elements.createStripeSetupButton.textContent = 'Add Card with Stripe';
+    elements.stripePaymentForm.hidden = true;
+    setStripePaymentStatus('');
+    return;
+  }
 
   if (!paymentMethod) {
     elements.fundingPaymentMethodSummary.className = 'callout muted';
-    elements.fundingPaymentMethodSummary.textContent = 'No Stripe payment method linked yet.';
+    elements.fundingPaymentMethodSummary.textContent = 'No Stripe cards linked yet.';
+    elements.linkedPaymentMethodsList.className = 'list empty';
+    elements.linkedPaymentMethodsList.textContent = 'No Stripe cards linked yet.';
+    elements.createStripeSetupButton.textContent = 'Add Card with Stripe';
     return;
   }
 
   elements.fundingPaymentMethodSummary.className = 'callout';
   elements.fundingPaymentMethodSummary.innerHTML = `
     <div class="row">
-      <strong>Linked payment method</strong>
-      <span class="pill subtle">${paymentMethod.provider.replaceAll('_', ' ')}</span>
+      <strong>Saved cards</strong>
+      <span class="pill subtle">${paymentMethods.length} linked</span>
     </div>
-    <p class="meta">${paymentMethod.cardBrand.toUpperCase()} •••• ${paymentMethod.cardLast4} expires ${String(paymentMethod.expMonth).padStart(2, '0')}/${paymentMethod.expYear}</p>
+    <p class="meta">Approved wallet-run charges use the active card until you add another one.</p>
   `;
+  elements.linkedPaymentMethodsList.className = 'list';
+  elements.linkedPaymentMethodsList.innerHTML = paymentMethods
+    .map(
+      (method) => `
+        <article class="list-card payment-method-card">
+          <div class="row">
+            <div>
+              <strong>${formatPaymentMethodLabel(method)}</strong>
+              <p class="meta">${method.provider.replaceAll('_', ' ')}</p>
+            </div>
+            ${method.paymentMethodId === runtime.activePaymentMethodId ? '<span class="pill">Used for charges</span>' : '<span class="pill subtle">Saved</span>'}
+          </div>
+        </article>
+      `
+    )
+    .join('');
+  elements.createStripeSetupButton.textContent = 'Add Another Card with Stripe';
+}
+
+function renderStripeSetup() {
+  if (!state.stripeSetup) {
+    elements.stripePaymentForm.hidden = true;
+    setStripePaymentStatus('');
+    return;
+  }
+
+  if (!state.stripeSetup.ready) {
+    elements.stripePaymentForm.hidden = true;
+    setStripePaymentStatus('Loading Stripe’s secure card form…');
+    return;
+  }
+
+  elements.stripePaymentForm.hidden = false;
+  setStripePaymentStatus('Stripe form ready. Enter card details and save the card.', 'info');
 }
 
 function renderStripeConfiguration() {
   const stripeEnabled = Boolean(state.meta?.stripe?.enabled);
 
   if (!stripeEnabled) {
+    elements.stripeConfigStatus.hidden = false;
     elements.stripeConfigStatus.className = 'callout muted';
     elements.stripeConfigStatus.innerHTML = `
       <strong>Stripe is not configured on this local server.</strong>
@@ -287,11 +394,9 @@ function renderStripeConfiguration() {
     return;
   }
 
-  elements.stripeConfigStatus.className = 'callout';
-  elements.stripeConfigStatus.innerHTML = `
-    <strong>Stripe is configured.</strong>
-    <p class="meta">You can set up a card with Stripe and use it for approved wallet-run charges.</p>
-  `;
+  elements.stripeConfigStatus.hidden = true;
+  elements.stripeConfigStatus.className = 'callout muted';
+  elements.stripeConfigStatus.textContent = '';
   elements.createStripeSetupButton.disabled = false;
   elements.createStripeSetupButton.title = '';
 }
@@ -301,6 +406,8 @@ function renderApprovals() {
     installation.pendingRequests.map((request) => ({
       walletInstallationId: installation.walletInstallationId,
       walletLabel: installation.label,
+      paymentMethods: linkedPaymentMethodsForRuntime(installation),
+      activePaymentMethodId: installation.activePaymentMethodId || installation.paymentMethod?.paymentMethodId || null,
       request
     }))
   );
@@ -314,7 +421,7 @@ function renderApprovals() {
   elements.approvalsList.className = 'list';
   elements.approvalsList.innerHTML = pendingRequests
     .map(
-      ({ walletInstallationId, walletLabel, request }) => `
+      ({ walletInstallationId, walletLabel, paymentMethods, activePaymentMethodId, request }) => `
         <article class="list-card">
           <div class="row">
             <div>
@@ -325,8 +432,33 @@ function renderApprovals() {
           </div>
           <p class="meta">Local runtime: ${walletLabel}</p>
           <p class="meta">Booking reference: ${request.payload.bookingReference || 'n/a'}</p>
+          ${
+            paymentMethods.length > 1
+              ? `
+                <label class="inline-select">
+                  <span>Charge this card</span>
+                  <select data-payment-method-select>
+                    ${paymentMethods
+                      .map(
+                        (paymentMethod) => `
+                          <option
+                            value="${paymentMethod.paymentMethodId}"
+                            ${paymentMethod.paymentMethodId === activePaymentMethodId ? 'selected' : ''}
+                          >
+                            ${formatPaymentMethodLabel(paymentMethod)}
+                          </option>
+                        `
+                      )
+                      .join('')}
+                  </select>
+                </label>
+              `
+              : paymentMethods.length === 1
+                ? `<p class="meta">Charge card: ${formatPaymentMethodLabel(paymentMethods[0])}</p>`
+                : '<p class="meta">No saved card linked to this runtime.</p>'
+          }
           <div class="row">
-            <button class="button small" data-action="approve" data-installation="${walletInstallationId}" data-id="${request.requestId}" type="button">Approve + Run Charge</button>
+            <button class="button small" data-action="approve" data-installation="${walletInstallationId}" data-id="${request.requestId}" type="button" ${paymentMethods.length ? '' : 'disabled'}>Approve + Run Charge</button>
             <button class="button small secondary" data-action="reject" data-installation="${walletInstallationId}" data-id="${request.requestId}" type="button">Reject</button>
           </div>
         </article>
@@ -338,11 +470,13 @@ function renderApprovals() {
 function render() {
   renderWalletCatalog();
   renderWalletSummary();
+  renderFundingOverview();
   renderPolicy();
   renderTransactions();
   renderRuntime();
   renderStripeConfiguration();
   renderFundingPaymentMethod();
+  renderStripeSetup();
   renderApprovals();
 }
 
@@ -437,6 +571,7 @@ function resetStripeSetup() {
   state.stripeSetup = null;
   elements.stripePaymentElement.replaceChildren();
   elements.stripePaymentForm.hidden = true;
+  setStripePaymentStatus('');
 }
 
 function activateTab(tabName) {
@@ -470,6 +605,10 @@ elements.existingWalletSelect.addEventListener('change', async () => {
   } catch (error) {
     setBanner(error.message, 'error');
   }
+});
+
+elements.bannerCloseButton.addEventListener('click', () => {
+  setBanner('');
 });
 
 elements.policyForm.addEventListener('submit', async (event) => {
@@ -513,12 +652,16 @@ elements.approvalsList.addEventListener('click', async (event) => {
   }
 
   try {
+    const reviewCard = button.closest('.list-card');
+    const selectedPaymentMethod = reviewCard?.querySelector('select[data-payment-method-select]');
     await requestJson(
       `/api/users/${currentUserId()}/local-wallet-installations/${button.dataset.installation}/requests/${button.dataset.id}/review`,
       {
         method: 'POST',
         body: {
-          decision: button.dataset.action
+          decision: button.dataset.action,
+          paymentMethodId:
+            button.dataset.action === 'approve' ? selectedPaymentMethod?.value || undefined : undefined
         }
       }
     );
@@ -591,18 +734,41 @@ elements.createStripeSetupButton.addEventListener('click', async () => {
       clientSecret: setupIntent.clientSecret
     });
     const paymentElement = elementsApi.create('payment');
-    paymentElement.mount('#stripe-payment-element');
 
     state.stripeSetup = {
       stripe,
       elements: elementsApi,
       paymentElement,
-      setupIntentId: setupIntent.setupIntentId
+      setupIntentId: setupIntent.setupIntentId,
+      ready: false
     };
 
-    elements.stripePaymentForm.hidden = false;
+    paymentElement.on('ready', () => {
+      if (state.stripeSetup?.paymentElement !== paymentElement) {
+        return;
+      }
+
+      state.stripeSetup.ready = true;
+      renderStripeSetup();
+    });
+
+    paymentElement.on('loaderror', () => {
+      if (state.stripeSetup?.paymentElement !== paymentElement) {
+        return;
+      }
+
+      state.stripeSetup.ready = false;
+      setStripePaymentStatus(
+        'Stripe could not load the secure card form. Try again.',
+        'error'
+      );
+    });
+
+    setStripePaymentStatus('Loading Stripe’s secure card form…');
+    paymentElement.mount('#stripe-payment-element');
+    renderStripeSetup();
     activateTab('funding');
-    setBanner('Stripe card setup started. Enter card details and save the card.');
+    setBanner('Stripe card setup started.');
   } catch (error) {
     setBanner(error.message, 'error');
   }
@@ -624,6 +790,11 @@ elements.stripePaymentForm.addEventListener('submit', async (event) => {
 
   if (!state.stripeSetup) {
     setBanner('Start Stripe card setup first.', 'error');
+    return;
+  }
+
+  if (!state.stripeSetup.ready) {
+    setBanner('Stripe is still loading the secure card form. Try again in a moment.', 'error');
     return;
   }
 

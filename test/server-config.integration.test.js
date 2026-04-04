@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 
 import { createConfiguredAgentWalletApp } from '../src/server.js';
 import { resolveMcpServerPaths } from '../src/mcp/server.js';
+import { resolveElectronAppConfig } from '../src/electron/config.js';
 
 test('dashboard server uses the same env-configured store paths as the MCP server', () => {
   const app = createConfiguredAgentWalletApp({
@@ -51,4 +54,36 @@ test('MCP server still honors explicit env overrides', () => {
 
   assert.equal(paths.dataFile, '/tmp/countersign-mcp-store.json');
   assert.equal(paths.walletDir, '/tmp/countersign-mcp-wallets');
+});
+
+test('dashboard server loads repo-local .env defaults when process env is unset', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'countersign-env-config-test-'));
+  await mkdir(rootDir, { recursive: true });
+  await writeFile(
+    join(rootDir, '.env'),
+    'COUNTERSIGN_DATA_FILE=/tmp/from-env-store.json\nCOUNTERSIGN_WALLET_DIR=/tmp/from-env-wallets\n',
+    'utf8'
+  );
+
+  const app = createConfiguredAgentWalletApp({
+    env: {},
+    cwd: rootDir
+  });
+
+  assert.equal(app.dataFile, '/tmp/from-env-store.json');
+  assert.equal(app.walletDir, '/tmp/from-env-wallets');
+});
+
+test('electron config loads repo-local .env defaults when process env is unset', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'countersign-electron-env-test-'));
+  await writeFile(join(rootDir, '.env'), 'COUNTERSIGN_ELECTRON_PORT=4567\n', 'utf8');
+
+  const config = resolveElectronAppConfig({
+    env: {},
+    cwd: rootDir,
+    importMetaUrl: `file://${join(rootDir, 'src', 'electron', 'main.js')}`
+  });
+
+  assert.equal(config.port, 4567);
+  assert.equal(config.serverUrl, 'http://127.0.0.1:4567/electron.html');
 });

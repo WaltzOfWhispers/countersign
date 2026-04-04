@@ -3,3 +3,5 @@ local-agent/*.json
 local-wallet/*.json
 node_modules/
 .DS_Store
+.env
+.env.local

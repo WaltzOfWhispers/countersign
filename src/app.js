@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
@@ -96,6 +97,7 @@ function buildUserSummary(store, userId) {
   if (!user) {
     return null;
   }
+  const wallet = normalizeWalletState(user.wallet, user.id);
 
   const agents = Object.values(store.agents)
     .filter((agent) => agent.ownerUserId === userId)
@@ -116,7 +118,7 @@ function buildUserSummary(store, userId) {
       name: user.name,
       createdAt: user.createdAt
     },
-    wallet: user.wallet,
+    wallet,
     walletInstallations,
     agents,
     activeClaimToken: activeClaimToken
@@ -139,31 +141,57 @@ function signedWalletEnvelope(walletIdentity, payload) {
 }
 
 function createUserRecord(name) {
+  const id = createId('user');
   return {
-    id: createId('user'),
+    id,
     name: name?.trim() || 'Demo user',
     createdAt: nowIsoTimestamp(),
-    wallet: {
-      balanceCents: 0,
-      stripeCustomerId: null,
-      fundingEvents: [],
-      policy: { ...DEFAULT_POLICY }
-    }
+    wallet: normalizeWalletState(
+      {
+        balanceCents: 0,
+        stripeCustomerId: null,
+        fundingEvents: [],
+        policy: { ...DEFAULT_POLICY }
+      },
+      id
+    )
+  };
+}
+
+function deriveEvmAddress(seed) {
+  const digest = createHash('sha256').update(String(seed || 'countersign')).digest('hex');
+  return `0x${digest.slice(0, 40)}`;
+}
+
+function normalizeWalletState(wallet = {}, userId) {
+  return {
+    balanceCents: Number.isInteger(wallet.balanceCents) ? wallet.balanceCents : 0,
+    stripeCustomerId: wallet.stripeCustomerId || null,
+    fundingEvents: Array.isArray(wallet.fundingEvents) ? wallet.fundingEvents : [],
+    policy: normalizePolicy(wallet.policy || DEFAULT_POLICY),
+    usdcBalanceBaseUnits: Number.isInteger(wallet.usdcBalanceBaseUnits)
+      ? wallet.usdcBalanceBaseUnits
+      : 0,
+    evmAddress: wallet.evmAddress || deriveEvmAddress(userId)
   };
 }
 
 function buildUserList(store) {
   return Object.values(store.users)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .map((user) => ({
-      id: user.id,
-      name: user.name,
-      createdAt: user.createdAt,
-      balanceCents: user.wallet.balanceCents,
-      claimedWalletInstallations: Object.values(store.walletInstallations || {}).filter(
-        (installation) => installation.ownerUserId === user.id
-      ).length
-    }));
+    .map((user) => {
+      const wallet = normalizeWalletState(user.wallet, user.id);
+
+      return {
+        id: user.id,
+        name: user.name,
+        createdAt: user.createdAt,
+        balanceCents: wallet.balanceCents,
+        claimedWalletInstallations: Object.values(store.walletInstallations || {}).filter(
+          (installation) => installation.ownerUserId === user.id
+        ).length
+      };
+    });
 }
 
 export function createAgentWalletApp({
@@ -626,7 +654,8 @@ export function createAgentWalletApp({
           walletAccountId: localReviewMatch[1],
           relayRequestId: localReviewMatch[3],
           decision: body.decision,
-          reasonCode: body.reasonCode
+          reasonCode: body.reasonCode,
+          paymentMethodId: body.paymentMethodId
         });
 
         return {

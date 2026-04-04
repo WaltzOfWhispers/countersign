@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 
 import { createAgentWalletApp } from './app.js';
+import { loadEnvFile } from './lib/env-file.js';
 
 function parseTrustedAgents(value) {
   if (!value) {
@@ -18,6 +19,8 @@ export function createConfiguredAgentWalletApp({
   env = process.env,
   cwd = process.cwd()
 } = {}) {
+  loadEnvFile({ env, baseDir: cwd });
+
   return createAgentWalletApp({
     dataFile: env.COUNTERSIGN_DATA_FILE || join(cwd, 'data', 'store.json'),
     walletDir: env.COUNTERSIGN_WALLET_DIR || join(cwd, 'local-wallet'),

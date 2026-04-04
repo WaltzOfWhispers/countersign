@@ -1,5 +1,6 @@
 import { nowIsoTimestamp, createId } from './ids.js';
 import { signPayload, verifyPayload } from './crypto.js';
+import { runMockStripeWalletCharge } from './payment-rails.js';
 
 function ensureOk(response, fallbackMessage) {
   if (response.status >= 200 && response.status < 300) {
@@ -97,6 +98,18 @@ export function createWalletDaemonClient({ send }) {
     status = 'approved',
     reasonCode = 'policy_passed'
   }) {
+    const execution =
+      status === 'approved' && installation.paymentMethod
+        ? runMockStripeWalletCharge({
+            amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
+            currency: relayRequest.payload.amount?.currency || 'USD',
+            walletAccountId,
+            agentId: relayRequest.payload.agentId,
+            relayRequestId: relayRequest.requestId,
+            paymentMethod: installation.paymentMethod
+          })
+        : undefined;
+
     const payload = {
       type: 'wallet.travel_authorization.v1',
       relayRequestId: relayRequest.requestId,
@@ -108,7 +121,8 @@ export function createWalletDaemonClient({ send }) {
       status,
       reasonCode,
       authorizedAt: nowIsoTimestamp(),
-      nonce: createId('nonce')
+      nonce: createId('nonce'),
+      execution
     };
     const signature = signPayload(payload, installation.privateKeyPem);
 
@@ -125,9 +139,9 @@ export function createWalletDaemonClient({ send }) {
     return data;
   }
 
-  return {
-    claimInstallation,
-    pollRequests,
-    authorizeRequest
-  };
+    return {
+      claimInstallation,
+      pollRequests,
+      authorizeRequest
+    };
 }

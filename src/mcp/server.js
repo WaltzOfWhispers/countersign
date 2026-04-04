@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 import { createCountersignControlPlane } from './control-plane.js';
 
@@ -9,16 +10,35 @@ const SERVER_INFO = {
 
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-03-26', '2024-11-05'];
 
-function parseTrustedAgents() {
-  if (!process.env.COUNTERSIGN_TRUSTED_AGENTS_JSON) {
+function parseTrustedAgents(value = process.env.COUNTERSIGN_TRUSTED_AGENTS_JSON) {
+  if (!value) {
     return {};
   }
 
   try {
-    return JSON.parse(process.env.COUNTERSIGN_TRUSTED_AGENTS_JSON);
+    return JSON.parse(value);
   } catch {
     throw new Error('COUNTERSIGN_TRUSTED_AGENTS_JSON must be valid JSON.');
   }
+}
+
+function projectRootFromImportMeta(importMetaUrl = import.meta.url) {
+  return dirname(dirname(dirname(fileURLToPath(importMetaUrl))));
+}
+
+export function resolveMcpServerPaths({
+  env = process.env,
+  cwd = process.cwd(),
+  importMetaUrl = import.meta.url
+} = {}) {
+  const projectRoot = projectRootFromImportMeta(importMetaUrl);
+  const baseDir = projectRoot || cwd;
+
+  return {
+    dataFile: env.COUNTERSIGN_DATA_FILE || join(baseDir, 'data', 'store.json'),
+    walletDir: env.COUNTERSIGN_WALLET_DIR || join(baseDir, 'local-wallet'),
+    trustedAgents: parseTrustedAgents(env.COUNTERSIGN_TRUSTED_AGENTS_JSON)
+  };
 }
 
 function buildTools() {
@@ -110,6 +130,21 @@ function buildTools() {
       }
     },
     {
+      name: 'link_wallet_payment_method',
+      description: 'Link a local mock Stripe payment-method reference to a wallet daemon installation.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          walletInstallationId: { type: 'string' },
+          cardBrand: { type: 'string' },
+          cardLast4: { type: 'string' },
+          expMonth: { type: 'number' },
+          expYear: { type: 'number' }
+        },
+        required: ['walletInstallationId']
+      }
+    },
+    {
       name: 'list_pending_wallet_requests',
       description: 'Poll the relay queue for pending travel-agent authorization requests for a local wallet daemon.',
       inputSchema: {
@@ -165,13 +200,15 @@ function toolError(message) {
   };
 }
 
-function createMcpServer() {
+export function createMcpServer({
+  env = process.env,
+  cwd = process.cwd(),
+  importMetaUrl = import.meta.url
+} = {}) {
   const tools = buildTools();
-  const controlPlane = createCountersignControlPlane({
-    dataFile: process.env.COUNTERSIGN_DATA_FILE || join(process.cwd(), 'data', 'store.json'),
-    walletDir: process.env.COUNTERSIGN_WALLET_DIR || join(process.cwd(), 'local-wallet'),
-    trustedAgents: parseTrustedAgents()
-  });
+  const controlPlane = createCountersignControlPlane(
+    resolveMcpServerPaths({ env, cwd, importMetaUrl })
+  );
 
   let initialized = false;
 
@@ -191,6 +228,8 @@ function createMcpServer() {
         return toolResult(await controlPlane.installWalletDaemon(args));
       case 'claim_wallet_daemon':
         return toolResult(await controlPlane.claimWalletDaemon(args));
+      case 'link_wallet_payment_method':
+        return toolResult(await controlPlane.linkWalletPaymentMethod(args));
       case 'list_pending_wallet_requests':
         return toolResult(await controlPlane.listPendingWalletRequests(args));
       case 'review_wallet_request':
@@ -297,8 +336,12 @@ function createMcpServer() {
   };
 }
 
-async function main() {
-  const server = createMcpServer();
+export async function main({
+  env = process.env,
+  cwd = process.cwd(),
+  importMetaUrl = import.meta.url
+} = {}) {
+  const server = createMcpServer({ env, cwd, importMetaUrl });
 
   process.stdin.setEncoding('utf8');
   let buffer = '';
@@ -337,4 +380,6 @@ async function main() {
   });
 }
 
-await main();
+if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+  await main();
+}

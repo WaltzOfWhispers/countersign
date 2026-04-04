@@ -1,10 +1,7 @@
 import { join } from 'node:path';
 
 import { createAgentWalletApp } from '../app.js';
-import { generateEd25519Keypair } from '../lib/crypto.js';
-import { createId, nowIsoTimestamp } from '../lib/ids.js';
-import { createWalletDaemonClient } from '../lib/wallet-daemon-client.js';
-import { createWalletInstallationStore } from '../lib/wallet-installation-files.js';
+import { createLocalWalletControlPlane } from '../lib/local-control-plane.js';
 
 function centsFromUsd(value, fieldName) {
   const parsed = Number(value);
@@ -53,8 +50,10 @@ export function createCountersignControlPlane({
     trustedAgents
   });
   const send = createAppTransport(app);
-  const walletClient = createWalletDaemonClient({ send });
-  const walletStore = createWalletInstallationStore({ walletDir });
+  const localControlPlane = createLocalWalletControlPlane({
+    send,
+    walletDir
+  });
 
   async function initialize() {
     await app.ensureWalletIdentity();
@@ -117,19 +116,11 @@ export function createCountersignControlPlane({
   }
 
   async function installWalletDaemon({ label }) {
-    const walletInstallationId = createId('wallet_install');
-    const installation = {
-      walletInstallationId,
-      label: label?.trim() || 'CLI daemon',
-      createdAt: nowIsoTimestamp(),
-      ...generateEd25519Keypair()
-    };
-    const filePath = await walletStore.saveWalletInstallation(installation);
-
+    const result = await localControlPlane.installWalletDaemon({ label });
     return {
-      walletInstallationId,
-      label: installation.label,
-      filePath
+      walletInstallationId: result.walletInstallationId,
+      label: result.label,
+      filePath: result.filePath
     };
   }
 
@@ -140,26 +131,33 @@ export function createCountersignControlPlane({
     label
   }) {
     await initialize();
-    const { installation } = await walletStore.loadWalletInstallation(walletInstallationId);
-
-    return walletClient.claimInstallation({
-      installation,
+    return localControlPlane.claimWalletDaemon({
+      walletInstallationId,
       walletAccountId,
       claimToken,
       label
     });
   }
 
+  async function linkWalletPaymentMethod({
+    walletInstallationId,
+    cardBrand = 'visa',
+    cardLast4 = '4242',
+    expMonth = 12,
+    expYear = 2030
+  }) {
+    return localControlPlane.linkWalletPaymentMethod({
+      walletInstallationId,
+      cardBrand,
+      cardLast4,
+      expMonth,
+      expYear
+    });
+  }
+
   async function listPendingWalletRequests({ walletInstallationId }) {
     await initialize();
-    const { installation } = await walletStore.loadWalletInstallation(walletInstallationId);
-    const result = await walletClient.pollRequests({ installation });
-
-    return {
-      walletInstallationId: result.walletInstallationId,
-      requestCount: result.requests.length,
-      requests: result.requests
-    };
+    return localControlPlane.listPendingWalletRequests({ walletInstallationId });
   }
 
   async function reviewWalletRequest({
@@ -170,20 +168,12 @@ export function createCountersignControlPlane({
     reasonCode
   }) {
     await initialize();
-    const { installation } = await walletStore.loadWalletInstallation(walletInstallationId);
-    const poll = await walletClient.pollRequests({ installation });
-    const relayRequest = poll.requests.find((request) => request.requestId === relayRequestId);
-
-    if (!relayRequest) {
-      throw new Error(`Relay request ${relayRequestId} was not found in the pending queue.`);
-    }
-
-    return walletClient.authorizeRequest({
-      installation,
-      relayRequest,
+    return localControlPlane.reviewWalletRequest({
+      walletInstallationId,
       walletAccountId,
-      status: decision === 'reject' ? 'rejected' : 'approved',
-      reasonCode: reasonCode?.trim() || (decision === 'reject' ? 'rejected_by_wallet' : 'policy_passed')
+      relayRequestId,
+      decision,
+      reasonCode
     });
   }
 
@@ -196,6 +186,7 @@ export function createCountersignControlPlane({
     setWalletPolicy,
     generateClaimToken,
     installWalletDaemon,
+    linkWalletPaymentMethod,
     claimWalletDaemon,
     listPendingWalletRequests,
     reviewWalletRequest

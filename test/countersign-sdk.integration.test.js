@@ -9,8 +9,9 @@ import { createAgentWalletApp } from '../src/app.js';
 import { generateEd25519Keypair, signPayload } from '../src/lib/crypto.js';
 import { createCountersignClient } from '../src/sdk/index.js';
 import { requestJson } from '../src/lib/http-client.js';
+import { createWalletDaemonClient } from '../src/lib/wallet-daemon-client.js';
 
-async function createHarness() {
+async function createHarness({ fundAmountCents = 20_000 } = {}) {
   const travelAgentKeys = generateEd25519Keypair();
   const rootDir = await mkdtemp(join(tmpdir(), 'countersign-sdk-test-'));
   const app = createAgentWalletApp({
@@ -44,10 +45,12 @@ async function createHarness() {
   });
   const userId = created.data.user.id;
 
-  await send(`/api/users/${userId}/fund`, {
-    method: 'POST',
-    body: { amountCents: 20_000 }
-  });
+  if (fundAmountCents > 0) {
+    await send(`/api/users/${userId}/fund`, {
+      method: 'POST',
+      body: { amountCents: fundAmountCents }
+    });
+  }
 
   const claimTokenResponse = await send(`/api/users/${userId}/claim-token`, {
     method: 'POST'
@@ -331,4 +334,63 @@ test('Countersign SDK can talk to a running server by baseUrl', async () => {
     server.close();
     await once(server, 'close');
   }
+});
+
+test('Countersign SDK sees a wallet-executed Stripe charge after local wallet approval', async () => {
+  const harness = await createHarness({ fundAmountCents: 0 });
+  const walletKeys = generateEd25519Keypair();
+  const installation = {
+    walletInstallationId: 'wallet_install_sdk_4',
+    label: 'SDK daemon',
+    publicKeyPem: walletKeys.publicKeyPem,
+    privateKeyPem: walletKeys.privateKeyPem,
+    paymentMethod: {
+      provider: 'mock_stripe_payment_method',
+      customerId: 'cus_sdk_wallet_1',
+      paymentMethodId: 'pm_sdk_wallet_1',
+      cardBrand: 'visa',
+      cardLast4: '4242',
+      expMonth: 12,
+      expYear: 2030
+    }
+  };
+  const walletClient = createWalletDaemonClient({ send: harness.send });
+
+  await walletClient.claimInstallation({
+    installation,
+    walletAccountId: harness.userId,
+    claimToken: harness.claimToken
+  });
+
+  const client = createCountersignClient({
+    agentId: 'travel-agent',
+    privateKeyPem: harness.travelAgentKeys.privateKeyPem,
+    send: harness.send
+  });
+
+  const relayRequest = await client.enqueueAuthorizationRequest({
+    walletAccountId: harness.userId,
+    amount: {
+      currency: 'USD',
+      minor: 2450
+    },
+    bookingReference: 'trip_sdk_4',
+    memo: 'Flight booking charge',
+    requestId: 'travel_req_sdk_4'
+  });
+
+  const pending = await walletClient.pollRequests({ installation });
+  await walletClient.authorizeRequest({
+    installation,
+    relayRequest: pending.requests[0],
+    walletAccountId: harness.userId
+  });
+
+  const paymentResult = await client.getAuthorizationResult({
+    relayRequestId: relayRequest.relayRequestId
+  });
+
+  assert.equal(paymentResult.status, 'charged');
+  assert.equal(paymentResult.execution.provider, 'mock_stripe_wallet_charge');
+  assert.equal(paymentResult.execution.paymentMethodId, installation.paymentMethod.paymentMethodId);
 });

@@ -13,6 +13,20 @@ export const DEFAULT_STORE = {
   paymentRequests: {}
 };
 
+function hydrateStore(rawStore = {}) {
+  return {
+    ...DEFAULT_STORE,
+    ...rawStore,
+    users: rawStore.users || {},
+    walletInstallations: rawStore.walletInstallations || {},
+    agents: rawStore.agents || {},
+    claimTokens: rawStore.claimTokens || {},
+    relayRequests: rawStore.relayRequests || {},
+    challenges: rawStore.challenges || {},
+    paymentRequests: rawStore.paymentRequests || {}
+  };
+}
+
 export function createStore(dataFile) {
   let writeQueue = Promise.resolve();
 
@@ -40,7 +54,7 @@ export function createStore(dataFile) {
   async function readCurrentStore() {
     await ensureStoreFile();
     const raw = await readFile(dataFile, 'utf8');
-    return JSON.parse(raw);
+    return hydrateStore(JSON.parse(raw));
   }
 
   async function updateStore(mutator) {

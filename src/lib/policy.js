@@ -46,7 +46,8 @@ export function evaluatePolicy({
   amountCents,
   merchant,
   requestedAt,
-  skipApprovalThreshold = false
+  skipApprovalThreshold = false,
+  skipBalanceCheck = false
 }) {
   if (!Number.isInteger(amountCents) || amountCents <= 0) {
     return { decision: 'reject', reason: 'invalid_amount', daySpendCents: 0 };
@@ -73,7 +74,7 @@ export function evaluatePolicy({
     return { decision: 'reject', reason: 'daily_cap_exceeded', daySpendCents };
   }
 
-  if (balanceCents < amountCents) {
+  if (!skipBalanceCheck && balanceCents < amountCents) {
     return { decision: 'reject', reason: 'insufficient_funds', daySpendCents };
   }
 

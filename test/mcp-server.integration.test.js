@@ -121,6 +121,7 @@ test('Countersign MCP server initializes and lists wallet tools', async () => {
     assert(toolNames.includes('create_wallet'));
     assert(toolNames.includes('get_wallet'));
     assert(toolNames.includes('install_wallet_daemon'));
+    assert(toolNames.includes('link_wallet_payment_method'));
     assert(toolNames.includes('review_wallet_request'));
   } finally {
     await client.close();
@@ -155,15 +156,6 @@ test('Countersign MCP tools can create, fund, install, and claim a local wallet 
     });
     const walletAccountId = created.result.structuredContent.user.id;
 
-    const funded = await client.request('tools/call', {
-      name: 'fund_wallet',
-      arguments: {
-        walletAccountId,
-        amountUsd: 200
-      }
-    });
-    assert.equal(funded.result.structuredContent.wallet.balanceCents, 20_000);
-
     const claimTokenResponse = await client.request('tools/call', {
       name: 'generate_claim_token',
       arguments: {
@@ -179,6 +171,18 @@ test('Countersign MCP tools can create, fund, install, and claim a local wallet 
       }
     });
     const walletInstallationId = installation.result.structuredContent.walletInstallationId;
+
+    const paymentMethod = await client.request('tools/call', {
+      name: 'link_wallet_payment_method',
+      arguments: {
+        walletInstallationId,
+        cardBrand: 'visa',
+        cardLast4: '4242',
+        expMonth: 12,
+        expYear: 2030
+      }
+    });
+    assert.equal(paymentMethod.result.structuredContent.paymentMethod.paymentMethodId.startsWith('pm_'), true);
 
     const claimed = await client.request('tools/call', {
       name: 'claim_wallet_daemon',
@@ -243,14 +247,6 @@ test('Countersign MCP tools can list and approve pending travel-agent requests',
     });
     const walletAccountId = created.result.structuredContent.user.id;
 
-    await client.request('tools/call', {
-      name: 'fund_wallet',
-      arguments: {
-        walletAccountId,
-        amountUsd: 200
-      }
-    });
-
     const claimTokenResponse = await client.request('tools/call', {
       name: 'generate_claim_token',
       arguments: {
@@ -266,6 +262,17 @@ test('Countersign MCP tools can list and approve pending travel-agent requests',
       }
     });
     const walletInstallationId = installation.result.structuredContent.walletInstallationId;
+
+    await client.request('tools/call', {
+      name: 'link_wallet_payment_method',
+      arguments: {
+        walletInstallationId,
+        cardBrand: 'visa',
+        cardLast4: '4242',
+        expMonth: 12,
+        expYear: 2030
+      }
+    });
 
     await client.request('tools/call', {
       name: 'claim_wallet_daemon',
@@ -326,7 +333,8 @@ test('Countersign MCP tools can list and approve pending travel-agent requests',
       }
     });
 
-    assert.equal(review.result.structuredContent.status, 'authorized');
+    assert.equal(review.result.structuredContent.status, 'charged');
+    assert.equal(review.result.structuredContent.execution.provider, 'mock_stripe_wallet_charge');
 
     const agentView = await app.routeRequest({
       method: 'GET',
@@ -334,7 +342,8 @@ test('Countersign MCP tools can list and approve pending travel-agent requests',
     });
 
     assert.equal(agentView.statusCode, 200);
-    assert.equal(agentView.payload.status, 'authorized');
+    assert.equal(agentView.payload.status, 'charged');
+    assert.equal(agentView.payload.execution.provider, 'mock_stripe_wallet_charge');
     assert.equal(
       verifyPayload(
         agentView.payload.receipt.payload,

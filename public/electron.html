@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Countersign Agent Wallet</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="desktop-app-shell">
+      <aside class="desktop-sidebar" aria-label="Countersign desktop navigation">
+        <div class="desktop-brand">
+          <div class="desktop-brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <p class="desktop-brand-title">Countersign</p>
+            <p class="desktop-brand-meta">Agent wallet</p>
+          </div>
+        </div>
+
+        <section class="desktop-wallet-picker">
+          <p class="desktop-sidebar-label">Wallet</p>
+          <div class="desktop-wallet-form">
+            <label>
+              <span>Existing wallet</span>
+              <select id="existing-wallet-select">
+                <option value="">No wallet discovered yet</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <nav class="desktop-sidebar-main">
+          <button class="tab-button active" data-tab="home" type="button">
+            <span class="desktop-nav-icon" aria-hidden="true">H</span>
+            <span>Home</span>
+          </button>
+          <button class="tab-button" data-tab="requests" type="button">
+            <span class="desktop-nav-icon" aria-hidden="true">R</span>
+            <span>Requests</span>
+          </button>
+          <button class="tab-button" data-tab="transactions" type="button">
+            <span class="desktop-nav-icon" aria-hidden="true">T</span>
+            <span>Transactions</span>
+          </button>
+          <button class="tab-button" data-tab="controls" type="button">
+            <span class="desktop-nav-icon" aria-hidden="true">S</span>
+            <span>Spending Controls</span>
+          </button>
+          <button class="tab-button" data-tab="funding" type="button">
+            <span class="desktop-nav-icon" aria-hidden="true">F</span>
+            <span>Funding</span>
+          </button>
+          <button class="tab-button" data-tab="settings" type="button">
+            <span class="desktop-nav-icon" aria-hidden="true">U</span>
+            <span>Settings</span>
+          </button>
+        </nav>
+
+        <div class="desktop-sidebar-footer">
+          <button id="forget-button" class="button secondary" type="button">Forget Wallet</button>
+        </div>
+      </aside>
+
+      <main class="desktop-workspace">
+        <div id="banner" class="banner" hidden></div>
+
+        <div class="desktop-panels">
+          <section id="home-panel" class="tab-panel active">
+            <section class="panel desktop-overview">
+              <div class="desktop-overview-copy">
+                <p class="eyebrow">Countersign Agent Wallet</p>
+                <h1>Keep wallet requests, rules, and payment setup in one local app.</h1>
+                <p class="hero-copy">
+                  The desktop app keeps the local agent wallet runtime active while the window
+                  is open, so you can review requests, inspect the ledger, adjust policy, and
+                  manage setup without bouncing between surfaces.
+                </p>
+              </div>
+              <div class="desktop-overview-meta">
+                <p id="wallet-id" class="pill subtle">No wallet loaded</p>
+              </div>
+            </section>
+
+            <section class="panel desktop-summary-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Active wallet</p>
+                  <h2>Agent wallet summary</h2>
+                </div>
+              </div>
+
+              <div id="wallet-summary" class="wallet-summary empty">
+                Load a wallet to manage requests, controls, transactions, and settings.
+              </div>
+            </section>
+          </section>
+
+          <section id="requests-panel" class="tab-panel" hidden>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Review</p>
+                  <h2>Pending requests</h2>
+                </div>
+              </div>
+
+              <div id="approvals-list" class="list empty">No relay requests waiting.</div>
+            </article>
+          </section>
+
+          <section id="transactions-panel" class="tab-panel" hidden>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Ledger</p>
+                  <h2>Transactions</h2>
+                </div>
+              </div>
+
+              <div id="transactions-list" class="list empty">No transactions yet.</div>
+            </article>
+          </section>
+
+          <section id="controls-panel" class="tab-panel" hidden>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Policy</p>
+                  <h2>Spending controls</h2>
+                </div>
+              </div>
+
+              <div id="policy-snapshot" class="callout muted">
+                Load a wallet to see the active spending policy.
+              </div>
+
+              <form id="policy-form" class="policy-grid">
+                <label>
+                  <span>Per-transaction limit (USD)</span>
+                  <input id="per-transaction-limit" type="number" min="0" step="0.01" />
+                </label>
+                <label>
+                  <span>Daily cap (USD)</span>
+                  <input id="daily-cap" type="number" min="0" step="0.01" />
+                </label>
+                <label>
+                  <span>Approval threshold (USD)</span>
+                  <input id="approval-threshold" type="number" min="0" step="0.01" />
+                </label>
+                <label class="wide">
+                  <span>Allowlisted merchants</span>
+                  <input id="allowed-merchants" placeholder="travel-agent, booking-engine" />
+                </label>
+                <button class="button" type="submit">Update Policy</button>
+              </form>
+            </article>
+          </section>
+
+          <section id="funding-panel" class="tab-panel" hidden>
+            <div class="layout">
+              <section class="column column-wide">
+                <article class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-kicker">Funding</p>
+                      <h2>Wallet balance</h2>
+                    </div>
+                  </div>
+
+                  <form id="fund-form" class="inline-form">
+                    <label>
+                      <span>Amount in USD</span>
+                      <input id="fund-amount" type="number" min="1" step="0.01" placeholder="250.00" />
+                    </label>
+                    <button class="button" type="submit">Top Up Wallet</button>
+                  </form>
+                </article>
+              </section>
+
+              <section class="column">
+                <article class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-kicker">Payment method</p>
+                      <h2>Link payment method</h2>
+                    </div>
+                  </div>
+
+                  <p class="meta">
+                    Attach the payment method this local agent wallet can use when it approves a
+                    request and runs the wallet-side charge flow.
+                  </p>
+
+                  <form id="payment-method-form" class="policy-grid">
+                    <label>
+                      <span>Card brand</span>
+                      <input id="card-brand" name="cardBrand" value="visa" />
+                    </label>
+                    <label>
+                      <span>Last 4</span>
+                      <input id="card-last4" name="cardLast4" value="4242" maxlength="4" />
+                    </label>
+                    <label>
+                      <span>Expiry month</span>
+                      <input id="card-exp-month" type="number" min="1" max="12" value="12" />
+                    </label>
+                    <label>
+                      <span>Expiry year</span>
+                      <input id="card-exp-year" type="number" min="2026" step="1" value="2030" />
+                    </label>
+                    <button class="button" type="submit">Link Payment Method</button>
+                  </form>
+                </article>
+              </section>
+            </div>
+          </section>
+
+          <section id="settings-panel" class="tab-panel" hidden>
+            <div class="layout">
+              <section class="column column-wide">
+                <article class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-kicker">Wallet</p>
+                      <h2>Create wallet</h2>
+                    </div>
+                  </div>
+
+                  <form id="create-wallet-form" class="inline-form">
+                    <label>
+                      <span>Wallet owner name</span>
+                      <input id="wallet-name" name="name" placeholder="Countersign wallet" />
+                    </label>
+                    <button class="button" type="submit">Create Wallet</button>
+                  </form>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-kicker">Funding</p>
+                      <h2>Optional stored balance</h2>
+                    </div>
+                  </div>
+                </article>
+              </section>
+
+              <section class="column">
+                <article class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-kicker">Runtime</p>
+                      <h2>Agent wallet runtime</h2>
+                    </div>
+                  </div>
+
+                  <p class="meta">
+                    When a wallet is loaded, Countersign provisions and claims a local agent
+                    wallet runtime automatically on this machine.
+                  </p>
+
+                  <div id="wallet-installations-list" class="list empty">No local runtime claimed yet.</div>
+                </article>
+              </section>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="/electron.js"></script>
+  </body>
+</html>

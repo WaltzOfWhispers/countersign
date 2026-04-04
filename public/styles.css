@@ -32,12 +32,28 @@ body {
   padding: 2rem 0 3rem;
 }
 
+.shell-desktop {
+  width: min(1380px, calc(100% - 2rem));
+}
+
+.desktop-app-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 1.25rem;
+  min-height: 100vh;
+  padding: 1.25rem;
+}
+
 .hero {
   display: flex;
   justify-content: space-between;
   gap: 2rem;
   align-items: flex-end;
   padding: 1rem 0 2rem;
+}
+
+.hero-desktop h1 {
+  max-width: 12ch;
 }
 
 .eyebrow,
@@ -139,11 +155,22 @@ h2 {
   gap: 0.75rem;
 }
 
+.policy-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
 .metric {
   padding: 0.9rem 1rem;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.58);
   border: 1px solid var(--line);
+}
+
+.metric.compact {
+  padding: 0.8rem 0.9rem;
 }
 
 .metric-label {
@@ -157,6 +184,12 @@ h2 {
   display: block;
   font-size: 1.15rem;
   font-weight: 700;
+}
+
+.metric-wrap {
+  font-size: 1rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .empty {
@@ -189,7 +222,8 @@ label {
   font-size: 0.95rem;
 }
 
-input {
+input,
+select {
   width: 100%;
   padding: 0.85rem 0.95rem;
   border-radius: 16px;
@@ -199,7 +233,8 @@ input {
   font: inherit;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: 2px solid rgba(198, 91, 44, 0.3);
   border-color: rgba(198, 91, 44, 0.6);
 }
@@ -269,6 +304,11 @@ input:focus {
 .status.approved {
   background: rgba(55, 86, 71, 0.14);
   color: var(--olive);
+}
+
+.status.charged {
+  background: rgba(35, 86, 116, 0.14);
+  color: #1f5875;
 }
 
 .status.pending_approval {
@@ -350,6 +390,196 @@ input:focus {
   color: var(--muted);
 }
 
+.tab-shell {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.desktop-sidebar {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 1rem;
+  align-content: start;
+  min-height: calc(100vh - 2.5rem);
+  padding: 1rem 0.85rem;
+  border: 1px solid rgba(27, 37, 42, 0.08);
+  border-radius: 30px;
+  background: rgba(247, 241, 232, 0.86);
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 1.25rem;
+}
+
+.desktop-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.35rem 0.4rem 0.25rem;
+}
+
+.desktop-brand-mark {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.18rem;
+  width: 28px;
+  height: 28px;
+}
+
+.desktop-brand-mark span {
+  display: block;
+  width: 6px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--ink) 0%, var(--accent) 100%);
+}
+
+.desktop-brand-mark span:nth-child(1) {
+  height: 17px;
+}
+
+.desktop-brand-mark span:nth-child(2) {
+  height: 24px;
+}
+
+.desktop-brand-mark span:nth-child(3) {
+  height: 13px;
+}
+
+.desktop-brand-title,
+.desktop-brand-meta,
+.desktop-sidebar-label {
+  margin: 0;
+}
+
+.desktop-brand-title {
+  font-weight: 800;
+  font-size: 1.2rem;
+}
+
+.desktop-brand-meta,
+.desktop-sidebar-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.desktop-wallet-picker {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0 0.4rem;
+}
+
+.desktop-wallet-form,
+.desktop-sidebar-main,
+.desktop-sidebar-footer {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.desktop-wallet-form {
+  padding: 0.9rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid var(--line);
+}
+
+.desktop-panels {
+  display: grid;
+  gap: 1rem;
+}
+
+.desktop-workspace {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  padding: 0.25rem 0 1.25rem;
+}
+
+.desktop-overview,
+.desktop-summary-panel {
+  background: rgba(255, 251, 245, 0.78);
+}
+
+.desktop-overview {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.desktop-overview-copy h1 {
+  max-width: 14ch;
+  font-size: clamp(2.4rem, 5vw, 3.7rem);
+}
+
+.desktop-overview-meta {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 180px;
+}
+
+.tab-strip {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tab-button {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 0.85rem 1rem;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.desktop-sidebar .tab-button {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  justify-self: stretch;
+  text-align: left;
+  border: none;
+  box-shadow: none;
+}
+
+.desktop-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 12px;
+  background: rgba(27, 37, 42, 0.06);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.tab-button.active {
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--ink);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(27, 37, 42, 0.04);
+}
+
+.tab-button.active .desktop-nav-icon {
+  background: linear-gradient(135deg, var(--accent) 0%, #df8d45 100%);
+  color: #fff7f1;
+  box-shadow: 0 10px 20px rgba(127, 53, 22, 0.15);
+}
+
+.tab-panel {
+  display: block;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -371,11 +601,22 @@ input:focus {
   }
 
   .layout,
+  .desktop-app-shell,
   .guide-grid,
   .wallet-summary,
+  .policy-snapshot-grid,
   .policy-grid,
   .inline-form {
     grid-template-columns: 1fr;
+  }
+
+  .desktop-sidebar {
+    position: static;
+    min-height: auto;
+  }
+
+  .desktop-overview {
+    flex-direction: column;
   }
 
   .hero-actions,

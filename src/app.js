@@ -4,7 +4,12 @@ import { extname, join, normalize } from 'node:path';
 
 import { generateEd25519Keypair, signPayload, verifyPayload } from './lib/crypto.js';
 import { createId, nowIsoTimestamp } from './lib/ids.js';
-import { runMockCrossmintCharge, runMockStripeTopUp, runMockStripeTravelCharge } from './lib/payment-rails.js';
+import { createLocalWalletControlPlane } from './lib/local-control-plane.js';
+import {
+  runMockCrossmintCharge,
+  runMockStripeTopUp,
+  runMockStripeTravelCharge
+} from './lib/payment-rails.js';
 import { DEFAULT_POLICY, evaluatePolicy, normalizePolicy } from './lib/policy.js';
 import { createStore } from './lib/store.js';
 
@@ -144,12 +149,42 @@ function createUserRecord(name) {
   };
 }
 
+function buildUserList(store) {
+  return Object.values(store.users)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map((user) => ({
+      id: user.id,
+      name: user.name,
+      createdAt: user.createdAt,
+      balanceCents: user.wallet.balanceCents,
+      claimedWalletInstallations: Object.values(store.walletInstallations || {}).filter(
+        (installation) => installation.ownerUserId === user.id
+      ).length
+    }));
+}
+
 export function createAgentWalletApp({
   dataFile = join(process.cwd(), 'data', 'store.json'),
   publicDir = join(process.cwd(), 'public'),
+  walletDir = join(process.cwd(), 'local-wallet'),
   trustedAgents = {}
 } = {}) {
   const storeApi = createStore(dataFile);
+  const localControlPlane = createLocalWalletControlPlane({
+    walletDir,
+    send: async (pathname, { method = 'GET', body } = {}) => {
+      const response = await routeRequest({
+        method,
+        pathname,
+        body
+      });
+
+      return {
+        status: response.statusCode,
+        data: response.payload
+      };
+    }
+  });
 
   async function ensureWalletIdentity() {
     await storeApi.updateStore((store) => {
@@ -167,7 +202,7 @@ export function createAgentWalletApp({
   async function serveStatic(pathname, response) {
     const filePath =
       pathname === '/'
-        ? join(publicDir, 'index.html')
+        ? join(publicDir, 'electron.html')
         : join(publicDir, normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, ''));
 
     try {
@@ -214,6 +249,124 @@ export function createAgentWalletApp({
         });
 
         return { statusCode: 201, payload: buildUserSummary(store, result.userId) };
+      }
+
+      if (method === 'GET' && pathname === '/api/users') {
+        const store = await storeApi.readStore();
+        return {
+          statusCode: 200,
+          payload: {
+            wallets: buildUserList(store)
+          }
+        };
+      }
+
+      const localDashboardMatch = pathname.match(/^\/api\/users\/([^/]+)\/local-dashboard$/);
+      if (method === 'GET' && localDashboardMatch) {
+        return {
+          statusCode: 200,
+          payload: await localControlPlane.getLocalDashboard({
+            walletAccountId: localDashboardMatch[1]
+          })
+        };
+      }
+
+      const localRuntimeMatch = pathname.match(/^\/api\/users\/([^/]+)\/local-runtime$/);
+      if (method === 'POST' && localRuntimeMatch) {
+        const result = await localControlPlane.ensureLocalWalletRuntime({
+          walletAccountId: localRuntimeMatch[1],
+          label: body.label
+        });
+
+        return {
+          statusCode: result.created ? 201 : 200,
+          payload: result
+        };
+      }
+
+      const localInstallMatch = pathname.match(/^\/api\/users\/([^/]+)\/local-wallet-installations$/);
+      if (method === 'POST' && localInstallMatch) {
+        const walletInstallation = await localControlPlane.installWalletDaemon({
+          label: body.label
+        });
+
+        return {
+          statusCode: 201,
+          payload: {
+            walletInstallation: walletInstallation.installation,
+            dashboard: await localControlPlane.getLocalDashboard({
+              walletAccountId: localInstallMatch[1]
+            })
+          }
+        };
+      }
+
+      const localPaymentMethodMatch = pathname.match(
+        /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/payment-method$/
+      );
+      if (method === 'POST' && localPaymentMethodMatch) {
+        const result = await localControlPlane.linkWalletPaymentMethod({
+          walletInstallationId: localPaymentMethodMatch[2],
+          cardBrand: body.cardBrand,
+          cardLast4: body.cardLast4,
+          expMonth: body.expMonth,
+          expYear: body.expYear
+        });
+
+        return {
+          statusCode: 200,
+          payload: {
+            walletInstallation: result.installation,
+            dashboard: await localControlPlane.getLocalDashboard({
+              walletAccountId: localPaymentMethodMatch[1]
+            })
+          }
+        };
+      }
+
+      const localClaimMatch = pathname.match(
+        /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/claim$/
+      );
+      if (method === 'POST' && localClaimMatch) {
+        const result = await localControlPlane.claimWalletDaemon({
+          walletInstallationId: localClaimMatch[2],
+          walletAccountId: localClaimMatch[1],
+          claimToken: body.claimToken,
+          label: body.label
+        });
+
+        return {
+          statusCode: 200,
+          payload: {
+            ...result,
+            dashboard: await localControlPlane.getLocalDashboard({
+              walletAccountId: localClaimMatch[1]
+            })
+          }
+        };
+      }
+
+      const localReviewMatch = pathname.match(
+        /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/requests\/([^/]+)\/review$/
+      );
+      if (method === 'POST' && localReviewMatch) {
+        const result = await localControlPlane.reviewWalletRequest({
+          walletInstallationId: localReviewMatch[2],
+          walletAccountId: localReviewMatch[1],
+          relayRequestId: localReviewMatch[3],
+          decision: body.decision,
+          reasonCode: body.reasonCode
+        });
+
+        return {
+          statusCode: 200,
+          payload: {
+            result,
+            dashboard: await localControlPlane.getLocalDashboard({
+              walletAccountId: localReviewMatch[1]
+            })
+          }
+        };
       }
 
       const userMatch = pathname.match(/^\/api\/users\/([^/]+)$/);
@@ -586,7 +739,8 @@ export function createAgentWalletApp({
             amountCents,
             merchant: serviceId,
             requestedAt: relayRequest.payload.timestamp,
-            skipApprovalThreshold: payload.status === 'approved'
+            skipApprovalThreshold: payload.status === 'approved',
+            skipBalanceCheck: Boolean(payload.execution)
           });
 
           if (payload.status === 'approved' && evaluation.decision !== 'approve') {
@@ -596,11 +750,16 @@ export function createAgentWalletApp({
             };
           }
 
-          relayRequest.status = payload.status === 'approved' ? 'authorized' : 'rejected';
+          relayRequest.status = payload.status === 'approved'
+            ? (payload.execution ? 'charged' : 'authorized')
+            : 'rejected';
           relayRequest.walletAuthorization = {
             payload,
             signature
           };
+          if (payload.execution) {
+            relayRequest.execution = payload.execution;
+          }
           relayRequest.updatedAt = nowIsoTimestamp();
 
           const payment = {
@@ -613,11 +772,23 @@ export function createAgentWalletApp({
             currency: String(relayRequest.payload.amount?.currency || 'USD').toUpperCase(),
             createdAt: relayRequest.createdAt,
             requestedAt: relayRequest.payload.timestamp,
-            status: relayRequest.status === 'authorized' ? 'approved' : 'rejected',
-            reason: payload.reasonCode || (relayRequest.status === 'authorized' ? 'policy_passed' : 'rejected_by_wallet'),
+            status:
+              relayRequest.status === 'rejected'
+                ? 'rejected'
+                : relayRequest.status === 'charged'
+                  ? 'charged'
+                  : 'approved',
+            reason:
+              payload.reasonCode ||
+              (relayRequest.status === 'rejected' ? 'rejected_by_wallet' : 'policy_passed'),
             policySnapshot: user.wallet.policy,
             daySpendCents: evaluation.daySpendCents
           };
+
+          if (payload.execution) {
+            payment.execution = payload.execution;
+            payment.executedAt = payload.execution.createdAt;
+          }
 
           store.paymentRequests[payment.id] = payment;
 
@@ -625,7 +796,9 @@ export function createAgentWalletApp({
             receipt: relayRequest.walletAuthorization,
             relayRequestId: relayRequest.id,
             status: relayRequest.status,
-            walletInstallation
+            walletInstallation,
+            execution: relayRequest.execution || null,
+            summary: buildUserSummary(store, relayRequest.walletAccountId)
           };
         });
 
@@ -639,7 +812,9 @@ export function createAgentWalletApp({
             receipt: result.receipt,
             relayRequestId: result.relayRequestId,
             status: result.status,
-            walletInstallation: result.walletInstallation
+            walletInstallation: result.walletInstallation,
+            execution: result.execution,
+            summary: result.summary
           }
         };
       }
@@ -663,7 +838,8 @@ export function createAgentWalletApp({
             requestId: relayRequest.id,
             status: relayRequest.status,
             receipt: relayRequest.walletAuthorization || null,
-            walletInstallation: walletInstallation || null
+            walletInstallation: walletInstallation || null,
+            execution: relayRequest.execution || relayRequest.capture?.charge || null
           }
         };
       }
@@ -1207,6 +1383,7 @@ export function createAgentWalletApp({
 
   return {
     dataFile,
+    walletDir,
     storeApi,
     ensureWalletIdentity,
     routeRequest,

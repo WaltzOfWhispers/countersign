@@ -4,6 +4,7 @@
   "private": true,
   "description": "Countersign travel-agent SDK for wallet authorization and capture flows.",
   "type": "module",
+  "main": "src/electron/main.js",
   "exports": {
     ".": "./index.js"
   },
@@ -18,14 +19,19 @@
   ],
   "scripts": {
     "start": "node src/server.js",
+    "desktop:start": "electron src/electron/main.js",
     "mcp:start": "node src/mcp/server.js",
     "agent:install": "node src/cli/install-agent.js",
     "agent:claim": "node src/cli/claim-agent.js",
     "agent:pay": "node src/cli/request-payment.js",
     "wallet:install": "node src/cli/install-wallet.js",
+    "wallet:link-payment-method": "node src/cli/link-wallet-payment-method.js",
     "wallet:claim": "node src/cli/claim-wallet.js",
     "wallet:poll": "node src/cli/poll-wallet.js",
     "wallet:authorize": "node src/cli/authorize-wallet.js",
     "test": "node --test"
+  },
+  "devDependencies": {
+    "electron": "^41.1.1"
   }
 }

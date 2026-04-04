@@ -26,8 +26,8 @@ console.log(`Saved installation: ${filePath}`);
 console.log('');
 console.log('Next steps:');
 console.log('1. Start the wallet server with `npm start`.');
-console.log('2. Open the dashboard on your configured local server URL and create a wallet.');
-console.log('3. Copy the wallet id and generate a claim token in the dashboard.');
+console.log('2. Create a wallet in the Countersign desktop app or via MCP.');
+console.log('3. Copy the wallet id and generate a claim token from the desktop app or MCP.');
 console.log(
   `4. Claim this agent with \`npm run agent:claim -- --agent ${installation.agentId} --wallet-account-id <wallet-id> --claim-token <token>\`.`
 );

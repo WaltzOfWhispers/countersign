@@ -6,6 +6,10 @@ Most "agent wallets" today answer the custody question before they answer the id
 
 Countersign is built around that gap. The travel agent signs the payment request. The user-run wallet daemon verifies the requester, checks local policy, and signs the authorization itself. The relay only routes messages. It does not become the trust anchor, and it does not sign on the wallet's behalf.
 
+For the current travel-agent wedge, the wallet can also hold a local Stripe-style payment-method reference. That means the travel agent asks Countersign for approval, the wallet approves, and the wallet runs the charge on behalf of the travel agent. The travel agent remains the merchant. Countersign remains the trust and payment-orchestration layer.
+
+The local agent wallet app is now part of that loop, not just a read-only admin page. Once the desktop app is running, you can create the wallet, manage funding, attach a local payment method, and review live travel-agent requests from one local surface.
+
 ## MCP Setup
 
 Countersign also includes a local MCP server so Claude can perform wallet actions directly. The MCP server talks to the same Countersign data store and local wallet installation files, so Claude can create wallets, generate claim tokens, install and claim local wallet identities, inspect pending requests, and approve or reject them.
@@ -32,6 +36,7 @@ After installation, confirm these tools are available:
 - set_wallet_policy
 - generate_claim_token
 - install_wallet_daemon
+- link_wallet_payment_method
 - claim_wallet_daemon
 - list_pending_wallet_requests
 - review_wallet_request
@@ -45,6 +50,7 @@ The MCP server exposes these wallet tools:
 - `set_wallet_policy`
 - `generate_claim_token`
 - `install_wallet_daemon`
+- `link_wallet_payment_method`
 - `claim_wallet_daemon`
 - `list_pending_wallet_requests`
 - `review_wallet_request`
@@ -60,6 +66,13 @@ The MCP-specific setup doc is in [docs/mcp-server.md](/Users/christycui/Document
 ## SDK Setup
 
 The travel-agent SDK is the right surface for your separate travel agent repo. It wraps the signed relay protocol so the travel agent does not have to reimplement canonical JSON signing, relay request construction, or wallet receipt verification itself.
+
+The recommended flow is:
+
+1. travel agent enqueues a payment request
+2. local wallet daemon or Claude approves it
+3. if the wallet has a linked local payment method, the wallet runs the Stripe-style charge
+4. travel agent polls Countersign for the final charged result
 
 Install it from GitHub in the travel-agent repo:
 
@@ -93,10 +106,8 @@ const authorization = await client.getAuthorizationResult({
   relayRequestId: relayRequest.relayRequestId
 });
 
-if (authorization.receipt.payload.status === 'approved') {
-  await client.captureAuthorizedCharge({
-    relayRequestId: relayRequest.relayRequestId
-  });
+if (authorization.status === 'charged') {
+  console.log(authorization.execution);
 }
 ```
 
@@ -110,23 +121,23 @@ Countersign takes the position that an agent payment system should be explicit a
 
 ## How It Works
 
-In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. Only after that receipt exists does the travel agent capture payment through the Stripe rail.
+In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a local Stripe-style payment-method reference. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the mock Stripe charge on behalf of the travel agent and returns that execution result through the relay.
 
-That means the approval path is anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
+That means the approval path and the charge path are anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
 ## Current Phase 1 Wedge
 
-This repository is intentionally narrow. It is not yet a general-purpose wallet for every agent and every rail. It is a proof of one opinionated loop: a remote travel agent business requests payment, a local wallet daemon authorizes it, and the business captures the charge only after receiving a wallet-signed receipt. In practice that means a local CLI or daemon wallet, a relay embedded in the MVP server, a remote travel agent backend as the requester, and a Stripe-style capture path after wallet authorization.
+This repository is intentionally narrow. It is not yet a general-purpose wallet for every agent and every rail. It is a proof of one opinionated loop: a remote travel agent business requests payment, a local wallet daemon authorizes it, and the wallet runs the Stripe-style charge on behalf of the travel agent after approval. In practice that means a local CLI or daemon wallet, a relay embedded in the MVP server, a remote travel agent backend as the requester, and a Stripe-style charge path triggered by wallet approval.
 
 The purpose of this MVP is to validate the trust model before expanding into mobile custody, broader agent distribution, or additional payment rails.
 
 ## Local Flow
 
-1. The user creates a wallet and funds it.
-2. The user installs a local wallet daemon and claims it to the wallet account with a signed proof.
+1. The user creates a wallet.
+2. The user installs a local wallet daemon, links a local payment method, and claims the daemon to the wallet account with a signed proof.
 3. The travel agent submits a signed authorization request to the relay for that wallet account.
-4. The wallet daemon polls the relay, verifies the request, applies policy, and signs the authorization.
-5. The travel agent reads the wallet-signed receipt and captures the payment.
+4. The wallet daemon polls the relay, verifies the request, applies policy, signs the authorization, and runs the Stripe-style charge if a payment method is linked.
+5. The travel agent reads the wallet-signed receipt and final charge result from the relay.
 
 ## Integration Contract
 
@@ -148,27 +159,38 @@ PORT=3100 node src/server.js
 
 Then:
 
-1. Open the dashboard and create a wallet.
-2. Fund the wallet and generate a claim token.
-3. Install a local wallet daemon:
+1. Start the desktop app:
+
+```bash
+npm run desktop:start
+```
+
+2. Create a wallet and manage controls, funding, and requests from the local app.
+3. If you want the CLI path instead of the desktop app, install a local wallet daemon:
 
 ```bash
 npm run wallet:install -- --label "CLI daemon"
 ```
 
-4. Claim it to the wallet account:
+4. CLI fallback: link a local payment method reference:
+
+```bash
+npm run wallet:link-payment-method -- --wallet <wallet-installation-id> --card-brand visa --card-last4 4242 --exp-month 12 --exp-year 2030
+```
+
+5. CLI fallback: claim it to the wallet account:
 
 ```bash
 npm run wallet:claim -- --wallet <wallet-installation-id> --wallet-account-id <wallet-id> --claim-token <token>
 ```
 
-5. Poll for relay requests:
+6. CLI fallback: poll for relay requests:
 
 ```bash
 npm run wallet:poll -- --wallet <wallet-installation-id>
 ```
 
-6. Authorize a queued request:
+7. CLI fallback: authorize a queued request:
 
 ```bash
 npm run wallet:authorize -- --wallet <wallet-installation-id> --wallet-account-id <wallet-id> --request-id <relay-request-id>

@@ -5,7 +5,7 @@ This document describes how the remote travel-agent backend talks to the user wa
 - local wallet daemon
 - relay
 - remote travel-agent backend
-- Stripe-style capture after wallet authorization
+- wallet-side Stripe-style charge after wallet authorization
 
 This is the contract to hand to the travel-agent coder.
 
@@ -57,14 +57,15 @@ The flow is:
 1. travel agent sends a signed authorization request to the relay
 2. wallet daemon polls relay and verifies the travel-agent signature
 3. wallet daemon signs an authorization receipt
-4. relay verifies the daemon signature and exposes the authorization result to the travel agent
-5. travel agent captures payment
+4. if the wallet has a linked local payment method, the wallet also runs the Stripe-style charge
+5. relay verifies the daemon signature and exposes the authorization result and charge result to the travel agent
 
 Important:
 
 - the relay does not sign wallet authorizations on behalf of the daemon
 - the wallet daemon signs its own authorization receipt
-- the travel agent signs its own enqueue and capture requests
+- the travel agent signs its own enqueue requests
+- the travel agent remains the merchant, but the wallet performs the charge on the travel agent's behalf in this MVP mode
 
 ## Onboarding
 
@@ -74,7 +75,7 @@ There are two separate onboarding paths.
 
 The user:
 
-1. creates a wallet account in the dashboard
+1. creates a wallet account in the local agent wallet app or via MCP
 2. generates a one-time claim token
 3. installs the local daemon and gets a local keypair
 4. claims the daemon to the wallet account
@@ -142,6 +143,12 @@ MVP assumption:
 
 This should be replaced later by an explicit user linking flow, but it is enough for the current MVP.
 
+### 3. Local payment method onboarding
+
+The local wallet daemon can hold a local Stripe-style payment-method reference. In this MVP that is a mock local reference, not a real Stripe PaymentMethod object yet.
+
+If a payment method is linked locally, wallet approval can also execute the charge. If no payment method is linked, the relay request can still be approved, but no wallet-side charge will be executed unless the legacy capture path is used.
+
 ## Signing Rules
 
 All signed payloads use:
@@ -180,7 +187,6 @@ The SDK wraps the raw HTTP contract below. In normal use, the travel-agent repo 
 - `createCountersignClient({ baseUrl, agentId, privateKeyPem })`
 - `enqueueAuthorizationRequest(...)`
 - `getAuthorizationResult(...)`
-- `captureAuthorizedCharge(...)`
 
 The rest of this section is the wire contract the SDK speaks.
 
@@ -250,12 +256,12 @@ Purpose:
 
 - read the current status of a relay request and fetch the wallet-signed authorization receipt
 
-Successful response after approval:
+Successful response after wallet approval and charge:
 
 ```json
 {
   "requestId": "travel_req_1",
-  "status": "authorized",
+  "status": "charged",
   "receipt": {
     "payload": {
       "type": "wallet.travel_authorization.v1",
@@ -280,6 +286,22 @@ Successful response after approval:
     "ownerUserId": "user_123",
     "publicKeyPem": "-----BEGIN PUBLIC KEY----- ...",
     "label": "CLI daemon"
+  },
+  "execution": {
+    "id": "charge_...",
+    "provider": "mock_stripe_wallet_charge",
+    "providerReference": "pi_...",
+    "status": "succeeded",
+    "amountCents": 2450,
+    "currency": "USD",
+    "walletAccountId": "user_123",
+    "agentId": "travel-agent",
+    "relayRequestId": "travel_req_1",
+    "paymentMethodId": "pm_...",
+    "customerId": "cus_...",
+    "cardBrand": "visa",
+    "cardLast4": "4242",
+    "createdAt": "2026-04-03T19:10:31.000Z"
   }
 }
 ```
@@ -287,11 +309,12 @@ Successful response after approval:
 Travel-agent backend requirements:
 
 - verify the signature on `receipt.payload` using `walletInstallation.publicKeyPem`
-- only proceed to capture if:
-  - `status === "authorized"`
+- only proceed if:
+  - `status === "charged"` or `status === "authorized"` for the legacy path
   - `receipt.payload.status === "approved"`
   - signature verification passes
   - `walletAccountId`, `agentId`, `amount`, and `bookingReference` match the original request
+  - if `execution` exists, treat that as the final wallet-run charge result and do not run a second Stripe charge from the travel agent
 
 ### C. Capture payment after authorization
 
@@ -301,7 +324,8 @@ Endpoint:
 
 Purpose:
 
-- tell the wallet backend that the travel agent is now capturing the payment through the Stripe rail
+- legacy fallback only
+- tell the wallet backend that the travel agent is now capturing the payment through the Stripe rail when the wallet did not already execute the charge locally
 
 Required payload:
 
@@ -337,10 +361,10 @@ Successful response:
 }
 ```
 
-Current MVP behavior:
+Preferred MVP behavior:
 
-- balance is deducted at capture time
-- not at authorization time
+- do not use this endpoint when the wallet already returned an `execution` result
+- the current architecture now prefers wallet-side execution when a local payment method is linked
 
 ## Wallet Daemon API Contract
 
@@ -451,10 +475,7 @@ sequenceDiagram
   T->>R: GET /api/relay/travel-agent/requests/:id
   R-->>T: wallet-signed authorization receipt
   T->>T: Verify wallet daemon signature
-
-  T->>R: POST /api/relay/travel-agent/requests/:id/capture (signed)
-  R->>S: Mock Stripe capture
-  R-->>T: capture result
+  T->>T: Read wallet execution result
 ```
 
 ## What The Travel Agent Coder Must Implement
@@ -467,8 +488,8 @@ At minimum:
 4. Call:
    - `enqueueAuthorizationRequest(...)`
    - `getAuthorizationResult(...)`
-   - `captureAuthorizedCharge(...)`
-5. Refuse capture if the verified authorization fields do not match the original request.
+5. Treat `execution` as the final wallet-run charge result when present.
+6. Refuse any duplicate charging if the verified authorization fields do not match the original request.
 
 ## What Is Still Missing
 
@@ -477,7 +498,7 @@ These are known MVP gaps:
 - no self-serve travel-agent registration yet
 - no explicit user-to-travel-agent linking screen yet
 - relay is polling, not a persistent daemon connection
-- capture uses a mock Stripe layer, not real Stripe APIs
+- wallet-side charge uses a mock Stripe layer, not real Stripe APIs
 - replay protection is freshness-based plus request-id uniqueness, not a hardened distributed nonce service
 
 ## Recommended Next Implementation Step For Travel Agent Repo
@@ -486,7 +507,7 @@ Create a small booking-facing adapter around the packaged Countersign SDK so the
 
 - request wallet authorization
 - wait for wallet approval
-- capture authorized charge
+- read the final wallet-run charge result
 
 The SDK already owns:
 
@@ -495,4 +516,4 @@ The SDK already owns:
 - wallet receipt verification
 - relay endpoint calling
 
-The travel-agent repo should still own field matching between the original booking request and the verified authorization result before capture.
+The travel-agent repo should still own field matching between the original booking request and the verified authorization result before marking the booking paid.

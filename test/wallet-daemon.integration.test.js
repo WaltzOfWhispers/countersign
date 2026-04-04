@@ -54,32 +54,6 @@ async function createHarness() {
   };
 }
 
-async function pairTravelAgentToWallet(harness) {
-  const securityCode = await harness.request(`/api/users/${harness.userId}/agent-link-code`, {
-    method: 'POST'
-  });
-  assert.equal(securityCode.status, 201);
-
-  const pairingPayload = {
-    type: 'agent.wallet_pairing.v1',
-    requestId: `pair_req_${Math.random().toString(16).slice(2)}`,
-    agentId: 'travel-agent',
-    walletAccountId: harness.userId,
-    securityCode: securityCode.data.activeAgentLinkCode.code,
-    timestamp: new Date().toISOString(),
-    nonce: `pair_nonce_${Math.random().toString(16).slice(2)}`
-  };
-
-  const paired = await harness.request('/api/relay/agent-links', {
-    method: 'POST',
-    body: {
-      payload: pairingPayload,
-      signature: signPayload(pairingPayload, harness.travelAgentKeys.privateKeyPem)
-    }
-  });
-  assert.equal(paired.status, 201);
-}
-
 test('wallet daemon can claim itself to a wallet account and receive a signed claim receipt', async () => {
   const harness = await createHarness();
   const daemonKeys = generateEd25519Keypair();
@@ -135,8 +109,6 @@ test('relay delivers a signed travel-agent authorization request to the claimed 
       signature: signPayload(claimPayload, daemonKeys.privateKeyPem)
     }
   });
-  await pairTravelAgentToWallet(harness);
-
   const relayPayload = {
     type: 'travel.payment_authorization_request.v1',
     requestId: 'travel_req_1',
@@ -219,8 +191,6 @@ test('wallet daemon can approve a queued travel-agent request and the relay retu
       signature: signPayload(claimPayload, daemonKeys.privateKeyPem)
     }
   });
-  await pairTravelAgentToWallet(harness);
-
   const relayPayload = {
     type: 'travel.payment_authorization_request.v1',
     requestId: 'travel_req_2',
@@ -311,8 +281,6 @@ test('travel agent can capture an authorized request through the Stripe rail aft
       signature: signPayload(claimPayload, daemonKeys.privateKeyPem)
     }
   });
-  await pairTravelAgentToWallet(harness);
-
   const relayPayload = {
     type: 'travel.payment_authorization_request.v1',
     requestId: 'travel_req_3',

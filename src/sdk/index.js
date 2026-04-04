@@ -70,30 +70,6 @@ export function createCountersignClient({ agentId, privateKeyPem, send, baseUrl 
     return ensureOk(response, 'Failed to enqueue authorization request.');
   }
 
-  async function pairWallet({
-    walletAccountId,
-    securityCode,
-    requestId = createId('agent_pair')
-  }) {
-    const payload = {
-      type: 'agent.wallet_pairing.v1',
-      requestId,
-      agentId,
-      walletAccountId,
-      securityCode,
-      timestamp: nowIsoTimestamp(),
-      nonce: createId('nonce')
-    };
-    const signature = signPayload(payload, privateKeyPem);
-
-    const response = await call('/api/relay/agent-links', {
-      method: 'POST',
-      body: { payload, signature }
-    });
-
-    return ensureOk(response, 'Failed to pair wallet with the travel agent.');
-  }
-
   async function getAuthorizationResult({ relayRequestId }) {
     const response = await call(`/api/relay/travel-agent/requests/${relayRequestId}`);
     const data = ensureOk(response, 'Failed to fetch authorization result.');
@@ -132,7 +108,6 @@ export function createCountersignClient({ agentId, privateKeyPem, send, baseUrl 
   }
 
   return {
-    pairWallet,
     enqueueAuthorizationRequest,
     getAuthorizationResult,
     captureAuthorizedCharge

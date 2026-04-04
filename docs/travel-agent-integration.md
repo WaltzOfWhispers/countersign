@@ -134,15 +134,11 @@ Current MVP behavior:
 - the server is initialized with a `trustedAgents` map keyed by `agentId`
 - the travel agent must hold the private key matching the configured public key
 
-Trust alone is not enough anymore.
-
 MVP assumption:
 
 - the travel agent backend already knows the target `walletAccountId`
-- the user opens Countersign Settings and generates a short-lived one-time security code
-- the travel agent redeems that code with a signed pairing request before it sends any payment request
-
-If the agent is trusted globally but not paired to that wallet, the relay rejects payment requests.
+- trusted agents can send payment requests to that wallet immediately
+- the relay checks agent signature and wallet existence, then queues the request for the local runtime
 
 ### 3. Local payment method onboarding
 
@@ -186,66 +182,12 @@ The server signs and verifies using that exact canonicalization. The travel-agen
 The SDK wraps the raw HTTP contract below. In normal use, the travel-agent repo should call:
 
 - `createCountersignClient({ baseUrl, agentId, privateKeyPem })`
-- `pairWallet(...)`
 - `enqueueAuthorizationRequest(...)`
 - `getAuthorizationResult(...)`
 
 The rest of this section is the wire contract the SDK speaks.
 
-### A. Pair the travel agent to a wallet with a one-time security code
-
-Endpoint:
-
-- `POST /api/relay/agent-links`
-
-Purpose:
-
-- redeem a short-lived security code from the wallet app so this trusted agent can send payment requests to that wallet
-
-Required payload:
-
-```json
-{
-  "type": "agent.wallet_pairing.v1",
-  "requestId": "pair_req_1",
-  "agentId": "travel-agent",
-  "walletAccountId": "user_123",
-  "securityCode": "482193",
-  "timestamp": "2026-04-03T19:05:00.000Z",
-  "nonce": "pair_nonce_1"
-}
-```
-
-Successful response:
-
-```json
-{
-  "link": {
-    "id": "user_123:travel-agent",
-    "walletAccountId": "user_123",
-    "walletInstallationId": "wallet_install_local_1",
-    "agentId": "travel-agent",
-    "label": "travel-agent",
-    "linkedAt": "2026-04-03T19:05:01.000Z",
-    "createdAt": "2026-04-03T19:05:01.000Z"
-  },
-  "summary": {
-    "activeAgentLinkCode": null,
-    "linkedAgents": [
-      {
-        "id": "user_123:travel-agent",
-        "agentId": "travel-agent",
-        "label": "travel-agent",
-        "linkedAt": "2026-04-03T19:05:01.000Z"
-      }
-    ]
-  }
-}
-```
-
-If the code is wrong, expired, or already used, the relay returns `403`.
-
-### B. Enqueue a payment authorization request
+### A. Enqueue a payment authorization request
 
 Endpoint:
 
@@ -299,12 +241,11 @@ Meaning:
 
 - relay accepted the request
 - a claimed wallet installation exists for that wallet account
-- this agent is already paired to that wallet
 - the request is now waiting for the wallet daemon
 
-If the agent is trusted but not paired to that wallet, the relay returns `403` with a pairing error.
+If the agent is not trusted by the relay, the relay returns `403`.
 
-### C. Retrieve wallet authorization result
+### B. Retrieve wallet authorization result
 
 Endpoint:
 

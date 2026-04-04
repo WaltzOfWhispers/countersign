@@ -64,39 +64,6 @@ async function createHarness({ fundAmountCents = 20_000 } = {}) {
   };
 }
 
-async function pairTravelAgent(harness) {
-  const summary = await harness.send(`/api/users/${harness.userId}`);
-  const hasClaimedRuntime = (summary.data.walletInstallations || []).length > 0;
-
-  if (!hasClaimedRuntime) {
-    const runtime = await harness.send(`/api/users/${harness.userId}/local-runtime`, {
-      method: 'POST',
-      body: {
-        label: 'Countersign Desktop'
-      }
-    });
-    assert.ok([200, 201].includes(runtime.status));
-  }
-
-  const securityCode = await harness.send(`/api/users/${harness.userId}/agent-link-code`, {
-    method: 'POST'
-  });
-  assert.equal(securityCode.status, 201);
-
-  const client = createCountersignClient({
-    agentId: 'travel-agent',
-    privateKeyPem: harness.travelAgentKeys.privateKeyPem,
-    send: harness.send
-  });
-
-  const pairing = await client.pairWallet({
-    walletAccountId: harness.userId,
-    securityCode: securityCode.data.activeAgentLinkCode.code
-  });
-  assert.equal(pairing.link.agentId, 'travel-agent');
-  return pairing;
-}
-
 test('Countersign SDK can enqueue a signed travel-agent authorization request', async () => {
   const harness = await createHarness();
   const walletKeys = generateEd25519Keypair();
@@ -126,7 +93,6 @@ test('Countersign SDK can enqueue a signed travel-agent authorization request', 
     privateKeyPem: harness.travelAgentKeys.privateKeyPem,
     send: harness.send
   });
-  await pairTravelAgent(harness);
 
   const relayRequest = await client.enqueueAuthorizationRequest({
     walletAccountId: harness.userId,
@@ -140,22 +106,6 @@ test('Countersign SDK can enqueue a signed travel-agent authorization request', 
 
   assert.equal(relayRequest.status, 'pending_wallet');
   assert.equal(relayRequest.walletInstallationId, 'wallet_install_sdk_1');
-});
-
-test('Countersign SDK can pair a travel agent to a wallet with a one-time security code', async () => {
-  const harness = await createHarness({ fundAmountCents: 0 });
-
-  const client = createCountersignClient({
-    agentId: 'travel-agent',
-    privateKeyPem: harness.travelAgentKeys.privateKeyPem,
-    send: harness.send
-  });
-
-  const pairing = await pairTravelAgent(harness);
-
-  assert.equal(pairing.link.walletAccountId, harness.userId);
-  assert.equal(pairing.link.agentId, 'travel-agent');
-  assert.equal(pairing.summary.activeAgentLinkCode, null);
 });
 
 test('Countersign SDK can fetch and verify a wallet authorization receipt', async () => {
@@ -188,7 +138,6 @@ test('Countersign SDK can fetch and verify a wallet authorization receipt', asyn
     privateKeyPem: harness.travelAgentKeys.privateKeyPem,
     send: harness.send
   });
-  await pairTravelAgent(harness);
 
   const relayRequest = await client.enqueueAuthorizationRequest({
     walletAccountId: harness.userId,
@@ -265,7 +214,6 @@ test('Countersign SDK can capture an authorized travel-agent charge', async () =
     privateKeyPem: harness.travelAgentKeys.privateKeyPem,
     send: harness.send
   });
-  await pairTravelAgent(harness);
 
   const relayRequest = await client.enqueueAuthorizationRequest({
     walletAccountId: harness.userId,
@@ -379,14 +327,6 @@ test('Countersign SDK can talk to a running server by baseUrl', async () => {
     });
     assert.equal(runtime.walletInstallation.ownerUserId, created.user.id);
 
-    const securityCode = await requestJson(`${baseUrl}/api/users/${created.user.id}/agent-link-code`, {
-      method: 'POST'
-    });
-    await client.pairWallet({
-      walletAccountId: created.user.id,
-      securityCode: securityCode.activeAgentLinkCode.code
-    });
-
     const relayRequest = await client.enqueueAuthorizationRequest({
       walletAccountId: created.user.id,
       amount: {
@@ -435,7 +375,6 @@ test('Countersign SDK sees a wallet-executed Stripe charge after local wallet ap
     privateKeyPem: harness.travelAgentKeys.privateKeyPem,
     send: harness.send
   });
-  await pairTravelAgent(harness);
 
   const relayRequest = await client.enqueueAuthorizationRequest({
     walletAccountId: harness.userId,

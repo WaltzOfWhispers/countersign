@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { createHash, randomInt } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
@@ -92,35 +92,6 @@ function getLatestWalletInstallationForUser(store, userId) {
     .sort((left, right) => right.claimedAt.localeCompare(left.claimedAt))[0];
 }
 
-function generateSecurityCode() {
-  return String(randomInt(0, 1_000_000)).padStart(6, '0');
-}
-
-function getActiveAgentLinkCode(store, userId) {
-  const now = Date.now();
-
-  return Object.values(store.agentLinkCodes || {})
-    .filter(
-      (code) =>
-        code.userId === userId &&
-        code.status === 'active' &&
-        new Date(code.expiresAt).getTime() > now
-    )
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-}
-
-function getLinkedAgentsForUser(store, userId) {
-  return Object.values(store.agentLinks || {})
-    .filter((link) => link.walletAccountId === userId)
-    .sort((left, right) => right.linkedAt.localeCompare(left.linkedAt))
-    .map((link) => ({
-      id: link.id,
-      agentId: link.agentId,
-      label: link.label || link.agentId,
-      linkedAt: link.linkedAt
-    }));
-}
-
 function buildUserSummary(store, userId) {
   const user = store.users[userId];
   if (!user) {
@@ -140,8 +111,6 @@ function buildUserSummary(store, userId) {
     .sort((left, right) => right.claimedAt.localeCompare(left.claimedAt));
 
   const activeClaimToken = getActiveClaimToken(store, userId);
-  const activeAgentLinkCode = getActiveAgentLinkCode(store, userId);
-  const linkedAgents = getLinkedAgentsForUser(store, userId);
 
   return {
     user: {
@@ -159,14 +128,6 @@ function buildUserSummary(store, userId) {
           createdAt: activeClaimToken.createdAt
         }
       : null,
-    activeAgentLinkCode: activeAgentLinkCode
-      ? {
-          code: activeAgentLinkCode.code,
-          expiresAt: activeAgentLinkCode.expiresAt,
-          createdAt: activeAgentLinkCode.createdAt
-        }
-      : null,
-    linkedAgents,
     pendingApprovals: transactions.filter((payment) => payment.status === 'pending_approval'),
     transactions
   };
@@ -972,54 +933,6 @@ export function createAgentWalletApp({
         return { statusCode: 201, payload: buildUserSummary(store, claimTokenMatch[1]) };
       }
 
-      const agentLinkCodeMatch = pathname.match(/^\/api\/users\/([^/]+)\/agent-link-code$/);
-      if (method === 'POST' && agentLinkCodeMatch) {
-        const { store, result } = await storeApi.updateStore((store) => {
-          const user = store.users[agentLinkCodeMatch[1]];
-          if (!user) {
-            throw new Error('USER_NOT_FOUND');
-          }
-
-          const walletInstallation = getLatestWalletInstallationForUser(store, user.id);
-          if (!walletInstallation) {
-            return {
-              error: 'A claimed local wallet runtime is required before generating an agent pairing code.',
-              statusCode: 409
-            };
-          }
-
-          Object.values(store.agentLinkCodes || {}).forEach((codeRecord) => {
-            if (codeRecord.userId === user.id && codeRecord.status === 'active') {
-              codeRecord.status = 'superseded';
-              codeRecord.supersededAt = nowIsoTimestamp();
-            }
-          });
-
-          const linkCodeId = createId('agent_code');
-          store.agentLinkCodes[linkCodeId] = {
-            id: linkCodeId,
-            userId: user.id,
-            walletInstallationId: walletInstallation.id,
-            code: generateSecurityCode(),
-            status: 'active',
-            createdAt: nowIsoTimestamp(),
-            expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
-          };
-
-          return { userId: user.id };
-        });
-
-        if (result?.error) {
-          return {
-            statusCode: result.statusCode,
-            payload: { error: result.error }
-          };
-        }
-
-        const summary = buildUserSummary(store, agentLinkCodeMatch[1]);
-        return { statusCode: 201, payload: summary };
-      }
-
       if (method === 'POST' && pathname === '/api/wallets/claim') {
         const { payload, signature } = body;
 
@@ -1161,14 +1074,6 @@ export function createAgentWalletApp({
             return { error: 'Wallet account not found.', statusCode: 404 };
           }
 
-          const linkedAgent = store.agentLinks[`${payload.walletAccountId}:${payload.agentId}`];
-          if (!linkedAgent) {
-            return {
-              error: 'Remote agent is not paired to this wallet. Pair it with a security code first.',
-              statusCode: 403
-            };
-          }
-
           const walletInstallation = getLatestWalletInstallationForUser(store, payload.walletAccountId);
           if (!walletInstallation) {
             return { error: 'No claimed wallet installation is available for that wallet account.', statusCode: 409 };
@@ -1198,101 +1103,6 @@ export function createAgentWalletApp({
 
         return {
           statusCode: 202,
-          payload: result
-        };
-      }
-
-      if (method === 'POST' && pathname === '/api/relay/agent-links') {
-        const { payload, signature } = body;
-
-        if (!payload || !signature) {
-          return {
-            statusCode: 400,
-            payload: { error: 'Agent pairing payload and signature are required.' }
-          };
-        }
-
-        if (!payload.requestId || !payload.agentId || !payload.walletAccountId || !payload.securityCode) {
-          return {
-            statusCode: 400,
-            payload: { error: 'Agent pairing payload is missing required fields.' }
-          };
-        }
-
-        if (!isFreshTimestamp(payload.timestamp)) {
-          return {
-            statusCode: 400,
-            payload: { error: 'Agent pairing timestamp is stale or invalid.' }
-          };
-        }
-
-        const trustedAgent = trustedAgents[payload.agentId];
-        if (!trustedAgent) {
-          return {
-            statusCode: 403,
-            payload: { error: 'Remote agent is not trusted by this relay.' }
-          };
-        }
-
-        if (!verifyPayload(payload, signature, trustedAgent.publicKeyPem)) {
-          return {
-            statusCode: 401,
-            payload: { error: 'Agent pairing signature verification failed.' }
-          };
-        }
-
-        const { store, result } = await storeApi.updateStore((store) => {
-          const user = store.users[payload.walletAccountId];
-          if (!user) {
-            return { error: 'Wallet account not found.', statusCode: 404 };
-          }
-
-          const codeRecord = Object.values(store.agentLinkCodes || {}).find(
-            (candidate) =>
-              candidate.userId === user.id &&
-              candidate.code === String(payload.securityCode).trim()
-          );
-
-          if (!codeRecord || codeRecord.status !== 'active') {
-            return { error: 'Security code is invalid or already used.', statusCode: 403 };
-          }
-
-          if (new Date(codeRecord.expiresAt).getTime() <= Date.now()) {
-            codeRecord.status = 'expired';
-            return { error: 'Security code has expired.', statusCode: 403 };
-          }
-
-          const linkId = `${user.id}:${payload.agentId}`;
-          const existingLink = store.agentLinks[linkId];
-          const linkedAt = nowIsoTimestamp();
-          store.agentLinks[linkId] = {
-            id: linkId,
-            walletAccountId: user.id,
-            walletInstallationId: codeRecord.walletInstallationId,
-            agentId: payload.agentId,
-            label: trustedAgent.label || payload.agentId,
-            linkedAt,
-            createdAt: existingLink?.createdAt || linkedAt
-          };
-
-          codeRecord.status = 'used';
-          codeRecord.usedAt = linkedAt;
-          codeRecord.agentId = payload.agentId;
-          codeRecord.requestId = payload.requestId;
-          codeRecord.nonce = payload.nonce;
-
-          return {
-            link: store.agentLinks[linkId],
-            summary: buildUserSummary(store, user.id)
-          };
-        });
-
-        if (result.error) {
-          return { statusCode: result.statusCode, payload: { error: result.error } };
-        }
-
-        return {
-          statusCode: 201,
           payload: result
         };
       }

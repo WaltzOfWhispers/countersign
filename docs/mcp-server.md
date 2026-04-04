@@ -172,6 +172,6 @@ Claude Desktop does not load your shell profile, so tools installed via version 
 
 ## Notes
 
-This MCP server is now the primary local wallet surface for Claude. The travel agent still uses the Countersign SDK for remote authorization requests and pairing, while Claude uses MCP to act on behalf of the wallet owner locally.
+This MCP server is now the primary local wallet surface for Claude. The travel agent still uses the Countersign SDK for remote authorization requests, while Claude uses MCP to act on behalf of the wallet owner locally.
 
 In the current travel-agent wedge, you do not need a preloaded wallet balance if the local wallet daemon has a linked payment method. In that mode, the wallet owner approves the request in the app or through Claude, and the wallet runs the Stripe charge locally on behalf of the travel agent.

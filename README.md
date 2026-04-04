@@ -116,8 +116,8 @@ The travel-agent SDK is the right surface for your separate travel agent repo. I
 
 The recommended flow is:
 
-1. user opens the local Countersign app and generates a one-time security code from `Settings`
-2. travel agent calls `pairWallet(...)` with the user's `walletAccountId` and that security code
+1. the user gives the travel agent their `walletAccountId`
+2. Countersign is configured to trust that travel agent’s public key
 3. travel agent enqueues a payment request
 4. local wallet daemon or the desktop app presents it for wallet-owner approval
 5. Claude can also approve it if the user explicitly chooses to do that from chat
@@ -145,11 +145,6 @@ const client = createCountersignClient({
   privateKeyPem: process.env.COUNTERSIGN_AGENT_PRIVATE_KEY
 });
 
-await client.pairWallet({
-  walletAccountId: 'user_123',
-  securityCode: '482193'
-});
-
 const relayRequest = await client.enqueueAuthorizationRequest({
   walletAccountId: 'user_123',
   amount: { currency: 'USD', minor: 2450 },
@@ -168,6 +163,12 @@ if (authorization.status === 'charged') {
 
 The full travel-agent handoff contract is in [docs/travel-agent-integration.md](/Users/christycui/Documents/agent_wallet/docs/travel-agent-integration.md).
 
+The travel agent no longer needs a one-time pairing code. It just needs:
+
+- the user’s `walletAccountId`
+- a trusted `agentId`
+- the matching Ed25519 private key for that trusted agent
+
 ## Why This Exists
 
 API keys and session tokens are good enough for many integrations, but they are weak foundations for autonomous spending. They identify an application session, not the specific actor asking to move money right now. That distinction matters once an agent can trigger charges without a human clicking through every payment flow.
@@ -176,7 +177,7 @@ Countersign takes the position that an agent payment system should be explicit a
 
 ## How It Works
 
-In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked either through Stripe Elements in the desktop app or through a hosted Stripe checkout flow for CLI and MCP. Separately, the remote travel agent backend has its own keypair. Before that agent can send payment traffic, the wallet issues a short-lived one-time security code and the agent redeems it with a signed pairing request. Only then can the travel agent send signed authorization requests through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The Stripe card is the funding instrument for wallet-run charges; Countersign does not custody a stored USD balance in this desktop flow.
+In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked either through Stripe Elements in the desktop app or through a hosted Stripe checkout flow for CLI and MCP. Separately, the remote travel agent backend has its own keypair. Once the travel agent knows the target `walletAccountId`, it can send signed authorization requests through the relay, as long as Countersign is configured to trust that agent’s public key. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The Stripe card is the funding instrument for wallet-run charges; Countersign does not custody a stored USD balance in this desktop flow.
 
 That means the approval path and the charge path are anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
@@ -190,11 +191,10 @@ The purpose of this MVP is to validate the trust model before expanding into mob
 
 1. The user creates a wallet.
 2. The user installs a local wallet daemon, links a local payment method, and claims the daemon to the wallet account with a signed proof.
-3. The wallet generates a short-lived security code for agent pairing.
-4. The travel agent redeems that code with a signed pairing request.
-5. The travel agent submits a signed authorization request to the relay for that wallet account.
-6. The wallet daemon polls the relay, verifies the request, applies policy, signs the authorization, and runs the Stripe charge if a payment method is linked.
-7. The travel agent reads the wallet-signed receipt and final charge result from the relay.
+3. Countersign trusts the travel agent’s public key.
+4. The travel agent submits a signed authorization request to the relay for that wallet account.
+5. The wallet daemon polls the relay, verifies the request, applies policy, signs the authorization, and runs the Stripe charge if a payment method is linked.
+6. The travel agent reads the wallet-signed receipt and final charge result from the relay.
 
 ## Integration Contract
 

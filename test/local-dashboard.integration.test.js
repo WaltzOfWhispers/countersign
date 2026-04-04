@@ -93,32 +93,6 @@ async function installLinkedClaimedWallet(harness) {
   };
 }
 
-async function pairTravelAgentToWallet(harness, travelAgentKeys) {
-  const code = await harness.request(`/api/users/${harness.walletAccountId}/agent-link-code`, {
-    method: 'POST'
-  });
-  assert.equal(code.status, 201);
-
-  const pairingPayload = {
-    type: 'agent.wallet_pairing.v1',
-    requestId: `pair_req_${Date.now()}`,
-    agentId: 'travel-agent',
-    walletAccountId: harness.walletAccountId,
-    securityCode: code.data.activeAgentLinkCode.code,
-    timestamp: new Date().toISOString(),
-    nonce: `pair_nonce_${Date.now()}`
-  };
-
-  const paired = await harness.request('/api/relay/agent-links', {
-    method: 'POST',
-    body: {
-      payload: pairingPayload,
-      signature: signPayload(pairingPayload, travelAgentKeys.privateKeyPem)
-    }
-  });
-  assert.equal(paired.status, 201);
-}
-
 test('local dashboard API can install, link, claim, and list a wallet daemon', async () => {
   const harness = await createHarness();
 
@@ -258,7 +232,6 @@ test('local dashboard API can approve a travel-agent request and show the wallet
   });
 
   const { walletInstallationId } = await installLinkedClaimedWallet(harness);
-  await pairTravelAgentToWallet(harness, travelAgentKeys);
   const relayPayload = {
     type: 'travel.payment_authorization_request.v1',
     requestId: 'travel_req_dashboard_1',
@@ -327,7 +300,6 @@ test('local dashboard API can approve a travel-agent request with a selected sav
   });
 
   const { walletInstallationId } = await installLinkedClaimedWallet(harness);
-  await pairTravelAgentToWallet(harness, travelAgentKeys);
   const beforeSecondCard = await harness.request(`/api/users/${harness.walletAccountId}/local-dashboard`);
   const firstPaymentMethodId =
     beforeSecondCard.data.localWalletInstallations[0].paymentMethods[0].paymentMethodId;

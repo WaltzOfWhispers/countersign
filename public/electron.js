@@ -19,13 +19,6 @@ const elements = {
   allowedMerchants: document.querySelector('#allowed-merchants'),
   createWalletForm: document.querySelector('#create-wallet-form'),
   walletName: document.querySelector('#wallet-name'),
-  agentPairingSummary: document.querySelector('#agent-pairing-summary'),
-  generateAgentLinkCodeButton: document.querySelector('#generate-agent-link-code-button'),
-  agentPairingCodeCard: document.querySelector('#agent-pairing-code-card'),
-  agentPairingCode: document.querySelector('#agent-pairing-code'),
-  agentPairingExpires: document.querySelector('#agent-pairing-expires'),
-  linkedAgentsCount: document.querySelector('#linked-agents-count'),
-  linkedAgentsList: document.querySelector('#linked-agents-list'),
   stripeConfigStatus: document.querySelector('#stripe-config-status'),
   fundingUsdcBalance: document.querySelector('#funding-usdc-balance'),
   fundingEvmAddress: document.querySelector('#funding-evm-address'),
@@ -178,10 +171,13 @@ function renderWalletSummary() {
   const { summary } = state;
   const runtime = claimedRuntime();
   const paymentMethods = linkedPaymentMethodsForRuntime(runtime);
+  const pendingRequests = state.localWalletInstallations.reduce(
+    (count, installation) => count + installation.pendingRequests.length,
+    0
+  );
   const linkedCard = runtime?.paymentMethod
     ? `${runtime.paymentMethod.cardBrand.toUpperCase()} •••• ${runtime.paymentMethod.cardLast4}`
     : 'No card linked';
-  const linkedAgents = summary.linkedAgents || [];
   elements.walletSummary.classList.remove('empty');
   elements.walletId.textContent = summary.user.id;
   elements.walletAccountIdValue.textContent = summary.user.id;
@@ -199,8 +195,8 @@ function renderWalletSummary() {
       <span class="metric-value">${paymentMethods.length}</span>
     </div>
     <div class="metric">
-      <span class="metric-label">Linked agents</span>
-      <span class="metric-value">${linkedAgents.length}</span>
+      <span class="metric-label">Pending requests</span>
+      <span class="metric-value">${pendingRequests}</span>
     </div>
   `;
 }
@@ -321,81 +317,6 @@ function renderRuntime() {
       <p class="meta">${runtime.pendingRequests.length} pending request(s)</p>
     </article>
   `;
-}
-
-function formatExpiry(timestamp) {
-  if (!timestamp) {
-    return 'Expires soon';
-  }
-
-  return `Expires ${new Date(timestamp).toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit'
-  })}`;
-}
-
-function renderAgentPairing() {
-  if (!state.summary) {
-    elements.agentPairingSummary.className = 'callout muted';
-    elements.agentPairingSummary.textContent =
-      'Load a wallet to generate a security code for agent onboarding.';
-    elements.agentPairingCodeCard.hidden = true;
-    elements.agentPairingCode.textContent = '------';
-    elements.agentPairingExpires.textContent = 'Expires soon';
-    elements.linkedAgentsCount.textContent = '0 linked';
-    elements.linkedAgentsList.className = 'list empty';
-    elements.linkedAgentsList.textContent = 'No remote agents linked yet.';
-    elements.generateAgentLinkCodeButton.disabled = true;
-    return;
-  }
-
-  const activeCode = state.summary.activeAgentLinkCode;
-  const linkedAgents = state.summary.linkedAgents || [];
-
-  elements.generateAgentLinkCodeButton.disabled = false;
-  elements.agentPairingSummary.className = 'callout';
-  elements.agentPairingSummary.innerHTML = `
-    <div class="row">
-      <strong>Pair remote agents to this wallet</strong>
-      <span class="pill subtle">${linkedAgents.length} linked</span>
-    </div>
-    <p class="meta">Only paired agents can send payment requests to this wallet runtime.</p>
-  `;
-
-  if (activeCode) {
-    elements.agentPairingCodeCard.hidden = false;
-    elements.agentPairingCode.textContent = activeCode.code;
-    elements.agentPairingExpires.textContent = formatExpiry(activeCode.expiresAt);
-  } else {
-    elements.agentPairingCodeCard.hidden = true;
-    elements.agentPairingCode.textContent = '------';
-    elements.agentPairingExpires.textContent = 'Expires soon';
-  }
-
-  elements.linkedAgentsCount.textContent = `${linkedAgents.length} linked`;
-  if (!linkedAgents.length) {
-    elements.linkedAgentsList.className = 'list empty';
-    elements.linkedAgentsList.textContent = 'No remote agents linked yet.';
-    return;
-  }
-
-  elements.linkedAgentsList.className = 'list';
-  elements.linkedAgentsList.innerHTML = linkedAgents
-    .map(
-      (agent) => `
-        <article class="list-card">
-          <div class="row">
-            <div>
-              <strong>${agent.label || agent.agentId}</strong>
-              <p class="meta">${agent.agentId}</p>
-            </div>
-            <span class="pill">Linked</span>
-          </div>
-          <p class="meta">Paired ${new Date(agent.linkedAt).toLocaleString()}</p>
-        </article>
-      `
-    )
-    .join('');
 }
 
 function renderFundingPaymentMethod() {
@@ -564,7 +485,6 @@ function render() {
   renderPolicy();
   renderTransactions();
   renderRuntime();
-  renderAgentPairing();
   renderStripeConfiguration();
   renderFundingPaymentMethod();
   renderStripeSetup();
@@ -781,24 +701,6 @@ elements.createWalletForm.addEventListener('submit', async (event) => {
     await loadState();
     activateTab('settings');
     setBanner(`Created wallet ${summary.user.id} and started the local runtime.`);
-  } catch (error) {
-    setBanner(error.message, 'error');
-  }
-});
-
-elements.generateAgentLinkCodeButton.addEventListener('click', async () => {
-  if (!currentUserId()) {
-    setBanner('Load a wallet before generating a pairing code.', 'error');
-    return;
-  }
-
-  try {
-    await requestJson(`/api/users/${currentUserId()}/agent-link-code`, {
-      method: 'POST'
-    });
-    await loadState();
-    activateTab('settings');
-    setBanner('Generated a one-time security code for agent pairing.');
   } catch (error) {
     setBanner(error.message, 'error');
   }

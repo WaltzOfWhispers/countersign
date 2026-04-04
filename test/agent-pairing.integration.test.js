@@ -7,18 +7,20 @@ import { join } from 'node:path';
 import { createAgentWalletApp } from '../src/app.js';
 import { generateEd25519Keypair, signPayload } from '../src/lib/crypto.js';
 
-async function createHarness() {
+async function createHarness({ trusted = true } = {}) {
   const travelAgentKeys = generateEd25519Keypair();
-  const rootDir = await mkdtemp(join(tmpdir(), 'countersign-agent-pairing-test-'));
+  const rootDir = await mkdtemp(join(tmpdir(), 'countersign-trusted-agent-test-'));
   const app = createAgentWalletApp({
     dataFile: join(rootDir, 'data', 'store.json'),
     walletDir: join(rootDir, 'local-wallet'),
-    trustedAgents: {
-      'travel-agent': {
-        id: 'travel-agent',
-        publicKeyPem: travelAgentKeys.publicKeyPem
-      }
-    }
+    trustedAgents: trusted
+      ? {
+          'travel-agent': {
+            id: 'travel-agent',
+            publicKeyPem: travelAgentKeys.publicKeyPem
+          }
+        }
+      : {}
   });
   await app.ensureWalletIdentity();
 
@@ -37,7 +39,7 @@ async function createHarness() {
 
   const created = await request('/api/users', {
     method: 'POST',
-    body: { name: 'Pairing Wallet' }
+    body: { name: 'Trusted Agent Wallet' }
   });
   assert.equal(created.status, 201);
 
@@ -52,67 +54,59 @@ async function createHarness() {
   return {
     request,
     walletAccountId: created.data.user.id,
+    walletInstallationId:
+      runtime.data.walletInstallation.walletInstallationId || runtime.data.walletInstallation.id,
     travelAgentKeys
   };
 }
 
-test('wallet can issue a one-time agent pairing code that a trusted agent redeems', async () => {
-  const harness = await createHarness();
-
-  const generatedCode = await harness.request(
-    `/api/users/${harness.walletAccountId}/agent-link-code`,
-    {
-      method: 'POST'
-    }
-  );
-
-  assert.equal(generatedCode.status, 201);
-  assert.match(generatedCode.data.activeAgentLinkCode.code, /^\d{6}$/);
-
-  const pairingPayload = {
-    type: 'agent.wallet_pairing.v1',
-    requestId: 'pair_req_1',
-    agentId: 'travel-agent',
-    walletAccountId: harness.walletAccountId,
-    securityCode: generatedCode.data.activeAgentLinkCode.code,
-    timestamp: new Date().toISOString(),
-    nonce: 'pair_nonce_1'
-  };
-
-  const paired = await harness.request('/api/relay/agent-links', {
-    method: 'POST',
-    body: {
-      payload: pairingPayload,
-      signature: signPayload(pairingPayload, harness.travelAgentKeys.privateKeyPem)
-    }
-  });
-
-  assert.equal(paired.status, 201);
-  assert.equal(paired.data.link.walletAccountId, harness.walletAccountId);
-  assert.equal(paired.data.link.agentId, 'travel-agent');
-  assert.equal(paired.data.summary.activeAgentLinkCode, null);
-  assert.deepEqual(
-    paired.data.summary.linkedAgents.map((agent) => agent.agentId),
-    ['travel-agent']
-  );
-});
-
-test('relay rejects travel-agent payment requests until the wallet pairs that agent', async () => {
+test('trusted travel-agent requests are accepted without wallet-agent pairing', async () => {
   const harness = await createHarness();
 
   const relayPayload = {
     type: 'travel.payment_authorization_request.v1',
-    requestId: 'travel_req_pairing_gate_1',
+    requestId: 'travel_req_trusted_1',
     agentId: 'travel-agent',
     walletAccountId: harness.walletAccountId,
     amount: {
       currency: 'USD',
       minor: 2450
     },
-    bookingReference: 'trip_pairing_gate_1',
+    bookingReference: 'trip_trusted_1',
     memo: 'Flight booking charge',
     timestamp: new Date().toISOString(),
-    nonce: 'travel_pairing_gate_nonce_1'
+    nonce: 'travel_trusted_nonce_1'
+  };
+
+  const enqueued = await harness.request('/api/relay/travel-agent/requests', {
+    method: 'POST',
+    body: {
+      payload: relayPayload,
+      signature: signPayload(relayPayload, harness.travelAgentKeys.privateKeyPem)
+    }
+  });
+
+  assert.equal(enqueued.status, 202);
+  assert.equal(enqueued.data.status, 'pending_wallet');
+  assert.equal(enqueued.data.walletInstallationId, harness.walletInstallationId);
+});
+
+test('relay still rejects travel-agent payment requests from untrusted agents', async () => {
+  const harness = await createHarness({ trusted: false });
+
+  const relayPayload = {
+    type: 'travel.payment_authorization_request.v1',
+    requestId: 'travel_req_untrusted_1',
+    agentId: 'travel-agent',
+    walletAccountId: harness.walletAccountId,
+    amount: {
+      currency: 'USD',
+      minor: 2450
+    },
+    bookingReference: 'trip_untrusted_1',
+    memo: 'Flight booking charge',
+    timestamp: new Date().toISOString(),
+    nonce: 'travel_untrusted_nonce_1'
   };
 
   const enqueued = await harness.request('/api/relay/travel-agent/requests', {
@@ -124,5 +118,5 @@ test('relay rejects travel-agent payment requests until the wallet pairs that ag
   });
 
   assert.equal(enqueued.status, 403);
-  assert.match(enqueued.data.error, /pair/i);
+  assert.match(enqueued.data.error, /trusted/i);
 });

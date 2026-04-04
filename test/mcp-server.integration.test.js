@@ -319,32 +319,6 @@ test('Countersign MCP tools can list pending travel-agent requests and surface a
     });
     await app.ensureWalletIdentity();
 
-    const securityCode = await app.routeRequest({
-      method: 'POST',
-      pathname: `/api/users/${walletAccountId}/agent-link-code`
-    });
-    assert.equal(securityCode.statusCode, 201);
-
-    const pairingPayload = {
-      type: 'agent.wallet_pairing.v1',
-      requestId: 'pair_req_mcp_1',
-      agentId: 'travel-agent',
-      walletAccountId,
-      securityCode: securityCode.payload.activeAgentLinkCode.code,
-      timestamp: new Date().toISOString(),
-      nonce: 'pair_nonce_mcp_1'
-    };
-
-    const pairing = await app.routeRequest({
-      method: 'POST',
-      pathname: '/api/relay/agent-links',
-      body: {
-        payload: pairingPayload,
-        signature: signPayload(pairingPayload, travelAgentKeys.privateKeyPem)
-      }
-    });
-    assert.equal(pairing.statusCode, 201);
-
     const relayPayload = {
       type: 'travel.payment_authorization_request.v1',
       requestId: 'travel_req_mcp_1',

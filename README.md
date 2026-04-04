@@ -12,6 +12,7 @@ It gives you one desktop app to manage:
 Claude can use the same wallet through MCP, and a remote agent can request payment by sending a signed request to Countersign and waiting for wallet approval.
 
 ![Countersign desktop app](./docs/countersign-desktop-home.png)
+![Countersign pending requests](./docs/countersign-desktop-requests.png)
 
 ## What It Is
 

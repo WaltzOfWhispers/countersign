@@ -199,6 +199,25 @@ h2 {
   border: 1px solid var(--line);
 }
 
+.metric-emphasis {
+  margin-top: 0.9rem;
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(35, 41, 44, 0.12);
+  box-shadow: 0 18px 36px rgba(203, 141, 83, 0.12);
+}
+
+.metric-emphasis .metric-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.metric-emphasis .metric-value {
+  font-size: 1.1rem;
+  line-height: 1.45;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+}
+
 .metric.compact {
   padding: 0.8rem 0.9rem;
 }

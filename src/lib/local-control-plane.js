@@ -241,6 +241,113 @@ export function createLocalWalletControlPlane({ send, walletDir, executeCharge }
     };
   }
 
+  async function listWalletCards({ walletAccountId }) {
+    const dashboard = await getLocalDashboard({ walletAccountId });
+    const runtime = dashboard.localWalletInstallations.find(
+      (installation) =>
+        installation.claimStatus === 'claimed' && installation.ownerUserId === walletAccountId
+    );
+
+    if (!runtime) {
+      throw new Error('No claimed local wallet runtime was found for that wallet.');
+    }
+
+    return {
+      walletAccountId,
+      walletInstallationId: runtime.walletInstallationId,
+      cards: runtime.paymentMethods || [],
+      activePaymentMethod: runtime.paymentMethod || null
+    };
+  }
+
+  async function setDefaultWalletCard({ walletAccountId, paymentMethodId }) {
+    if (!paymentMethodId) {
+      throw new Error('paymentMethodId is required.');
+    }
+
+    const dashboard = await getLocalDashboard({ walletAccountId });
+    const runtime = dashboard.localWalletInstallations.find(
+      (installation) =>
+        installation.claimStatus === 'claimed' && installation.ownerUserId === walletAccountId
+    );
+
+    if (!runtime) {
+      throw new Error('No claimed local wallet runtime was found for that wallet.');
+    }
+
+    const updated = await walletStore.updateWalletInstallation(
+      runtime.walletInstallationId,
+      (installation) => {
+        const paymentMethods = installation.paymentMethods || [];
+        const selected = paymentMethods.find(
+          (paymentMethod) => paymentMethod.paymentMethodId === paymentMethodId
+        );
+
+        if (!selected) {
+          throw new Error(`Payment method ${paymentMethodId} was not found on this wallet runtime.`);
+        }
+
+        return {
+          ...installation,
+          activePaymentMethodId: selected.paymentMethodId
+        };
+      }
+    );
+
+    return {
+      walletAccountId,
+      walletInstallationId: updated.installation.walletInstallationId,
+      cards: updated.installation.paymentMethods || [],
+      activePaymentMethod: updated.installation.paymentMethod || null
+    };
+  }
+
+  async function listWalletRequests({ walletAccountId }) {
+    const dashboard = await getLocalDashboard({ walletAccountId });
+    const runtime = dashboard.localWalletInstallations.find(
+      (installation) =>
+        installation.claimStatus === 'claimed' && installation.ownerUserId === walletAccountId
+    );
+
+    if (!runtime) {
+      throw new Error('No claimed local wallet runtime was found for that wallet.');
+    }
+
+    return {
+      walletAccountId,
+      walletInstallationId: runtime.walletInstallationId,
+      requestCount: runtime.pendingRequests.length,
+      requests: runtime.pendingRequests
+    };
+  }
+
+  async function respondWalletRequest({
+    walletAccountId,
+    relayRequestId,
+    decision,
+    reasonCode,
+    paymentMethodId
+  }) {
+    const dashboard = await getLocalDashboard({ walletAccountId });
+    const runtime = dashboard.localWalletInstallations.find(
+      (installation) =>
+        installation.claimStatus === 'claimed' && installation.ownerUserId === walletAccountId
+    );
+
+    if (!runtime) {
+      throw new Error('No claimed local wallet runtime was found for that wallet.');
+    }
+
+    return reviewWalletRequest({
+      walletInstallationId: runtime.walletInstallationId,
+      walletAccountId,
+      relayRequestId,
+      decision,
+      reasonCode,
+      paymentMethodId
+    });
+  }
+
   return {
     installWalletDaemon,
     linkWalletPaymentMethod,
@@ -248,6 +355,10 @@ export function createLocalWalletControlPlane({ send, walletDir, executeCharge }
     ensureLocalWalletRuntime,
     listPendingWalletRequests,
     reviewWalletRequest,
-    getLocalDashboard
+    getLocalDashboard,
+    listWalletCards,
+    setDefaultWalletCard,
+    listWalletRequests,
+    respondWalletRequest
   };
 }

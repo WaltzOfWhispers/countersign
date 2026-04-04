@@ -2,6 +2,7 @@ import { join } from 'node:path';
 
 import { createAgentWalletApp } from '../app.js';
 import { createLocalWalletControlPlane } from '../lib/local-control-plane.js';
+import { runMockStripeWalletCharge } from '../lib/payment-rails.js';
 import { createStripeGateway } from '../lib/stripe-gateway.js';
 
 function centsFromUsd(value, fieldName) {
@@ -74,6 +75,17 @@ export function createCountersignControlPlane({
         });
       }
 
+      if (installation.paymentMethod.provider === 'mock_stripe_payment_method') {
+        return runMockStripeWalletCharge({
+          amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
+          currency: relayRequest.payload.amount?.currency || 'USD',
+          walletAccountId,
+          agentId: relayRequest.payload.agentId,
+          relayRequestId: relayRequest.requestId,
+          paymentMethod: installation.paymentMethod
+        });
+      }
+
       return undefined;
     }
   });
@@ -89,6 +101,12 @@ export function createCountersignControlPlane({
       body: { name }
     });
 
+    return response.data;
+  }
+
+  async function listWallets() {
+    await initialize();
+    const response = await send('/api/users');
     return response.data;
   }
 
@@ -247,9 +265,71 @@ export function createCountersignControlPlane({
     });
   }
 
+  async function listWalletCards({ walletAccountId }) {
+    await initialize();
+    return localControlPlane.listWalletCards({ walletAccountId });
+  }
+
+  async function setDefaultWalletCard({ walletAccountId, paymentMethodId }) {
+    await initialize();
+    return localControlPlane.setDefaultWalletCard({ walletAccountId, paymentMethodId });
+  }
+
+  async function requestWalletCharge({
+    walletAccountId,
+    merchant,
+    amountUsd,
+    memo,
+    bookingReference,
+    paymentMethodId
+  }) {
+    await initialize();
+    const response = await send(`/api/users/${walletAccountId}/charge-requests`, {
+      method: 'POST',
+      body: {
+        merchant,
+        amountCents: centsFromUsd(amountUsd, 'amountUsd'),
+        memo,
+        bookingReference,
+        paymentMethodId
+      }
+    });
+
+    if (response.status >= 400) {
+      throw new Error(response.data?.error || 'Failed to request a wallet charge.');
+    }
+
+    return response.data;
+  }
+
+  async function listWalletRequests({ walletAccountId }) {
+    await initialize();
+    return localControlPlane.listWalletRequests({ walletAccountId });
+  }
+
+  async function respondWalletRequest({
+    walletAccountId,
+    relayRequestId,
+    decision,
+    reasonCode,
+    paymentMethodId
+  }) {
+    await initialize();
+    return {
+      result: await localControlPlane.respondWalletRequest({
+        walletAccountId,
+        relayRequestId,
+        decision,
+        reasonCode,
+        paymentMethodId
+      })
+    };
+  }
+
   return {
     initialize,
     app,
+    listWallets,
     createWallet,
     getWallet,
     fundWallet,
@@ -259,6 +339,11 @@ export function createCountersignControlPlane({
     linkWalletPaymentMethod,
     claimWalletDaemon,
     listPendingWalletRequests,
-    reviewWalletRequest
+    reviewWalletRequest,
+    listWalletCards,
+    setDefaultWalletCard,
+    requestWalletCharge,
+    listWalletRequests,
+    respondWalletRequest
   };
 }

@@ -12,7 +12,9 @@ The local agent wallet app is now part of that loop, not just a read-only admin 
 
 ## MCP Setup
 
-Countersign also includes a local MCP server so Claude can perform wallet actions directly. The MCP server talks to the same Countersign data store and local wallet installation files, so Claude can create wallets, generate claim tokens, install and claim local wallet identities, inspect pending requests, and approve or reject them.
+Countersign also includes a local MCP server so Claude can act like it has a wallet. The MCP server talks to the same Countersign data store and local wallet installation files as the desktop app, so Claude can manage saved cards, request charges, inspect pending approvals, and review them without dropping down to relay or runtime details.
+
+The desktop app is still the primary approval surface. Claude is the optional conversational surface when you want to approve or reject a pending request from chat instead of the app.
 
 From the Countersign repo, start it with:
 
@@ -20,40 +22,67 @@ From the Countersign repo, start it with:
 npm run mcp:start
 ```
 
-Then replace `/absolute/path/to/countersign` below and paste this prompt into Claude:
+If you want to register it in Claude Desktop directly, add this to:
+
+- `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "countersign": {
+      "command": "/bin/bash",
+      "args": [
+        "-c",
+        "cd /Users/christycui/Documents/agent_wallet && /Users/christycui/.nvm/versions/node/v24.11.1/bin/node src/mcp/server.js"
+      ]
+    }
+  }
+}
+```
+
+Then fully restart Claude Desktop so it respawns the MCP server and picks up the latest tools.
+
+If you prefer the in-app installer flow, paste this prompt into Claude:
 
 ```text
 Please add a local MCP server named "countersign" with:
 
 - command: npm
 - args: run mcp:start
-- cwd: /absolute/path/to/countersign
+- cwd: /Users/christycui/Documents/agent_wallet
 
 After installation, confirm these tools are available:
+- list_wallets
 - create_wallet
 - get_wallet
-- fund_wallet
 - set_wallet_policy
-- generate_claim_token
-- install_wallet_daemon
 - link_wallet_payment_method
-- claim_wallet_daemon
-- list_pending_wallet_requests
-- review_wallet_request
+- list_wallet_cards
+- set_default_wallet_card
+- request_wallet_charge
+- list_wallet_requests
+- respond_wallet_request
 ```
 
 The MCP server exposes these wallet tools:
 
+- `list_wallets`
 - `create_wallet`
 - `get_wallet`
-- `fund_wallet`
 - `set_wallet_policy`
+- `list_wallet_cards`
+- `set_default_wallet_card`
+- `request_wallet_charge`
+- `list_wallet_requests`
+- `respond_wallet_request`
+- `link_wallet_payment_method`
 - `generate_claim_token`
 - `install_wallet_daemon`
-- `link_wallet_payment_method`
 - `claim_wallet_daemon`
 - `list_pending_wallet_requests`
 - `review_wallet_request`
+
+`respond_wallet_request` is a wallet-owner action. `review_wallet_request` is the older low-level runtime version and is only needed if you are working directly with runtime ids.
 
 If you want the MCP server to use a different store location, set:
 
@@ -63,7 +92,19 @@ If you want the MCP server to use a different store location, set:
 
 The MCP-specific setup doc is in [docs/mcp-server.md](/Users/christycui/Documents/agent_wallet/docs/mcp-server.md).
 
-`link_wallet_payment_method` is now a two-step real Stripe flow for Claude and CLI:
+The Claude-first wallet loop is now:
+
+1. `list_wallets`
+2. `create_wallet`
+3. `get_wallet`
+4. `link_wallet_payment_method`
+5. `list_wallet_cards`
+6. optional `set_default_wallet_card`
+7. `request_wallet_charge`
+8. if policy requires approval, the normal path is to approve it in the desktop app `Requests` tab
+9. if you want to approve it from chat instead: `list_wallet_requests` then `respond_wallet_request`
+
+`link_wallet_payment_method` is a two-step real Stripe flow for Claude and CLI:
 
 1. call it with `walletInstallationId` and `walletAccountId`
 2. open the returned `checkoutUrl` in a browser and complete Stripe checkout
@@ -75,10 +116,13 @@ The travel-agent SDK is the right surface for your separate travel agent repo. I
 
 The recommended flow is:
 
-1. travel agent enqueues a payment request
-2. local wallet daemon or Claude approves it
-3. if the wallet has a linked Stripe payment method, the wallet runs the Stripe charge
-4. travel agent polls Countersign for the final charged result
+1. user opens the local Countersign app and generates a one-time security code from `Settings`
+2. travel agent calls `pairWallet(...)` with the user's `walletAccountId` and that security code
+3. travel agent enqueues a payment request
+4. local wallet daemon or the desktop app presents it for wallet-owner approval
+5. Claude can also approve it if the user explicitly chooses to do that from chat
+6. if the wallet has a linked Stripe payment method, the wallet runs the Stripe charge
+7. travel agent polls Countersign for the final charged result
 
 Install it from GitHub in the travel-agent repo:
 
@@ -99,6 +143,11 @@ const client = createCountersignClient({
   baseUrl: 'https://wallet.example.com',
   agentId: 'travel-agent',
   privateKeyPem: process.env.COUNTERSIGN_AGENT_PRIVATE_KEY
+});
+
+await client.pairWallet({
+  walletAccountId: 'user_123',
+  securityCode: '482193'
 });
 
 const relayRequest = await client.enqueueAuthorizationRequest({
@@ -127,7 +176,7 @@ Countersign takes the position that an agent payment system should be explicit a
 
 ## How It Works
 
-In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked either through Stripe Elements in the desktop app or through a hosted Stripe checkout flow for CLI and MCP. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The Stripe card is the funding instrument for wallet-run charges; Countersign does not custody a stored USD balance in this desktop flow.
+In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked either through Stripe Elements in the desktop app or through a hosted Stripe checkout flow for CLI and MCP. Separately, the remote travel agent backend has its own keypair. Before that agent can send payment traffic, the wallet issues a short-lived one-time security code and the agent redeems it with a signed pairing request. Only then can the travel agent send signed authorization requests through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The Stripe card is the funding instrument for wallet-run charges; Countersign does not custody a stored USD balance in this desktop flow.
 
 That means the approval path and the charge path are anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
@@ -141,9 +190,11 @@ The purpose of this MVP is to validate the trust model before expanding into mob
 
 1. The user creates a wallet.
 2. The user installs a local wallet daemon, links a local payment method, and claims the daemon to the wallet account with a signed proof.
-3. The travel agent submits a signed authorization request to the relay for that wallet account.
-4. The wallet daemon polls the relay, verifies the request, applies policy, signs the authorization, and runs the Stripe charge if a payment method is linked.
-5. The travel agent reads the wallet-signed receipt and final charge result from the relay.
+3. The wallet generates a short-lived security code for agent pairing.
+4. The travel agent redeems that code with a signed pairing request.
+5. The travel agent submits a signed authorization request to the relay for that wallet account.
+6. The wallet daemon polls the relay, verifies the request, applies policy, signs the authorization, and runs the Stripe charge if a payment method is linked.
+7. The travel agent reads the wallet-signed receipt and final charge result from the relay.
 
 ## Integration Contract
 

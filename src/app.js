@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
@@ -92,6 +92,35 @@ function getLatestWalletInstallationForUser(store, userId) {
     .sort((left, right) => right.claimedAt.localeCompare(left.claimedAt))[0];
 }
 
+function generateSecurityCode() {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+function getActiveAgentLinkCode(store, userId) {
+  const now = Date.now();
+
+  return Object.values(store.agentLinkCodes || {})
+    .filter(
+      (code) =>
+        code.userId === userId &&
+        code.status === 'active' &&
+        new Date(code.expiresAt).getTime() > now
+    )
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+}
+
+function getLinkedAgentsForUser(store, userId) {
+  return Object.values(store.agentLinks || {})
+    .filter((link) => link.walletAccountId === userId)
+    .sort((left, right) => right.linkedAt.localeCompare(left.linkedAt))
+    .map((link) => ({
+      id: link.id,
+      agentId: link.agentId,
+      label: link.label || link.agentId,
+      linkedAt: link.linkedAt
+    }));
+}
+
 function buildUserSummary(store, userId) {
   const user = store.users[userId];
   if (!user) {
@@ -111,6 +140,8 @@ function buildUserSummary(store, userId) {
     .sort((left, right) => right.claimedAt.localeCompare(left.claimedAt));
 
   const activeClaimToken = getActiveClaimToken(store, userId);
+  const activeAgentLinkCode = getActiveAgentLinkCode(store, userId);
+  const linkedAgents = getLinkedAgentsForUser(store, userId);
 
   return {
     user: {
@@ -128,6 +159,14 @@ function buildUserSummary(store, userId) {
           createdAt: activeClaimToken.createdAt
         }
       : null,
+    activeAgentLinkCode: activeAgentLinkCode
+      ? {
+          code: activeAgentLinkCode.code,
+          expiresAt: activeAgentLinkCode.expiresAt,
+          createdAt: activeAgentLinkCode.createdAt
+        }
+      : null,
+    linkedAgents,
     pendingApprovals: transactions.filter((payment) => payment.status === 'pending_approval'),
     transactions
   };
@@ -735,6 +774,182 @@ export function createAgentWalletApp({
         return { statusCode: 200, payload: buildUserSummary(store, policyMatch[1]) };
       }
 
+      const chargeRequestMatch = pathname.match(/^\/api\/users\/([^/]+)\/charge-requests$/);
+      if (method === 'POST' && chargeRequestMatch) {
+        const walletAccountId = chargeRequestMatch[1];
+        const merchant = String(body.merchant || '').trim();
+        const amountCents = Math.round(Number(body.amountCents));
+        const currency = String(body.currency || 'USD').toUpperCase();
+        const requestId = body.requestId || createId('wallet_charge');
+        const requestedAt = nowIsoTimestamp();
+
+        if (!merchant) {
+          return {
+            statusCode: 400,
+            payload: { error: 'merchant is required.' }
+          };
+        }
+
+        if (!Number.isInteger(amountCents) || amountCents <= 0) {
+          return {
+            statusCode: 400,
+            payload: { error: 'amountCents must be a positive integer.' }
+          };
+        }
+
+        const dashboard = await localControlPlane.getLocalDashboard({ walletAccountId });
+        const runtime = dashboard.localWalletInstallations.find(
+          (installation) =>
+            installation.claimStatus === 'claimed' && installation.ownerUserId === walletAccountId
+        );
+
+        if (!runtime) {
+          return {
+            statusCode: 409,
+            payload: { error: 'No claimed local wallet runtime is available for that wallet.' }
+          };
+        }
+
+        const paymentMethodId =
+          body.paymentMethodId ||
+          runtime.activePaymentMethodId ||
+          runtime.paymentMethod?.paymentMethodId ||
+          null;
+        const selectedPaymentMethod = (runtime.paymentMethods || []).find(
+          (paymentMethod) => paymentMethod.paymentMethodId === paymentMethodId
+        );
+
+        if (!selectedPaymentMethod) {
+          return {
+            statusCode: 409,
+            payload: { error: 'Link a card before requesting a local wallet charge.' }
+          };
+        }
+
+        const { store, result } = await storeApi.updateStore((store) => {
+          const user = store.users[walletAccountId];
+          if (!user) {
+            throw new Error('USER_NOT_FOUND');
+          }
+
+          if (store.relayRequests[requestId] || store.paymentRequests[requestId]) {
+            return { error: 'Charge request id has already been used.', statusCode: 409 };
+          }
+
+          const approvedTransactions = getApprovedTransactionsForUser(store, user.id);
+          const evaluation = evaluatePolicy({
+            policy: user.wallet.policy,
+            approvedTransactions,
+            balanceCents: user.wallet.balanceCents,
+            amountCents,
+            merchant,
+            requestedAt,
+            skipBalanceCheck: true
+          });
+
+          if (evaluation.decision === 'reject') {
+            const payment = {
+              id: requestId,
+              userId: user.id,
+              agentId: 'claude-local',
+              label: body.memo?.trim() || merchant,
+              merchant,
+              amountCents,
+              currency,
+              createdAt: nowIsoTimestamp(),
+              requestedAt,
+              status: 'rejected',
+              reason: evaluation.reason,
+              policySnapshot: user.wallet.policy,
+              daySpendCents: evaluation.daySpendCents
+            };
+
+            store.paymentRequests[payment.id] = payment;
+
+            return {
+              status: 'rejected',
+              requestId,
+              reason: evaluation.reason,
+              summary: buildUserSummary(store, user.id)
+            };
+          }
+
+          const relayPayload = {
+            type: 'wallet.local_charge_request.v1',
+            requestId,
+            agentId: 'claude-local',
+            walletAccountId: user.id,
+            amount: {
+              currency,
+              minor: amountCents
+            },
+            bookingReference: body.bookingReference?.trim() || null,
+            memo: body.memo?.trim() || `${merchant} charge`,
+            timestamp: requestedAt,
+            nonce: createId('nonce'),
+            source: 'mcp'
+          };
+
+          store.relayRequests[requestId] = {
+            id: requestId,
+            walletAccountId: user.id,
+            walletInstallationId: runtime.walletInstallationId,
+            agentId: 'claude-local',
+            payload: relayPayload,
+            signature: null,
+            status: 'pending_wallet',
+            createdAt: nowIsoTimestamp()
+          };
+
+          return {
+            status:
+              evaluation.decision === 'pending_approval' ? 'pending_approval' : 'pending_wallet',
+            requestId,
+            walletInstallationId: runtime.walletInstallationId
+          };
+        });
+
+        if (result.error) {
+          return { statusCode: result.statusCode, payload: { error: result.error } };
+        }
+
+        if (result.status === 'rejected') {
+          return { statusCode: 200, payload: result };
+        }
+
+        if (result.status === 'pending_approval') {
+          return {
+            statusCode: 202,
+            payload: {
+              ...result,
+              paymentMethodId: selectedPaymentMethod.paymentMethodId,
+              summary: buildUserSummary(store, walletAccountId)
+            }
+          };
+        }
+
+        const reviewed = await localControlPlane.reviewWalletRequest({
+          walletInstallationId: runtime.walletInstallationId,
+          walletAccountId,
+          relayRequestId: requestId,
+          decision: 'approve',
+          paymentMethodId: selectedPaymentMethod.paymentMethodId
+        });
+
+        return {
+          statusCode: 200,
+          payload: {
+            requestId,
+            walletInstallationId: runtime.walletInstallationId,
+            paymentMethodId: selectedPaymentMethod.paymentMethodId,
+            status: reviewed.status,
+            execution: reviewed.execution || null,
+            receipt: reviewed.receipt,
+            summary: reviewed.summary
+          }
+        };
+      }
+
       const claimTokenMatch = pathname.match(/^\/api\/users\/([^/]+)\/claim-token$/);
       if (method === 'POST' && claimTokenMatch) {
         const { store } = await storeApi.updateStore((store) => {
@@ -755,6 +970,54 @@ export function createAgentWalletApp({
         });
 
         return { statusCode: 201, payload: buildUserSummary(store, claimTokenMatch[1]) };
+      }
+
+      const agentLinkCodeMatch = pathname.match(/^\/api\/users\/([^/]+)\/agent-link-code$/);
+      if (method === 'POST' && agentLinkCodeMatch) {
+        const { store, result } = await storeApi.updateStore((store) => {
+          const user = store.users[agentLinkCodeMatch[1]];
+          if (!user) {
+            throw new Error('USER_NOT_FOUND');
+          }
+
+          const walletInstallation = getLatestWalletInstallationForUser(store, user.id);
+          if (!walletInstallation) {
+            return {
+              error: 'A claimed local wallet runtime is required before generating an agent pairing code.',
+              statusCode: 409
+            };
+          }
+
+          Object.values(store.agentLinkCodes || {}).forEach((codeRecord) => {
+            if (codeRecord.userId === user.id && codeRecord.status === 'active') {
+              codeRecord.status = 'superseded';
+              codeRecord.supersededAt = nowIsoTimestamp();
+            }
+          });
+
+          const linkCodeId = createId('agent_code');
+          store.agentLinkCodes[linkCodeId] = {
+            id: linkCodeId,
+            userId: user.id,
+            walletInstallationId: walletInstallation.id,
+            code: generateSecurityCode(),
+            status: 'active',
+            createdAt: nowIsoTimestamp(),
+            expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
+          };
+
+          return { userId: user.id };
+        });
+
+        if (result?.error) {
+          return {
+            statusCode: result.statusCode,
+            payload: { error: result.error }
+          };
+        }
+
+        const summary = buildUserSummary(store, agentLinkCodeMatch[1]);
+        return { statusCode: 201, payload: summary };
       }
 
       if (method === 'POST' && pathname === '/api/wallets/claim') {
@@ -898,6 +1161,14 @@ export function createAgentWalletApp({
             return { error: 'Wallet account not found.', statusCode: 404 };
           }
 
+          const linkedAgent = store.agentLinks[`${payload.walletAccountId}:${payload.agentId}`];
+          if (!linkedAgent) {
+            return {
+              error: 'Remote agent is not paired to this wallet. Pair it with a security code first.',
+              statusCode: 403
+            };
+          }
+
           const walletInstallation = getLatestWalletInstallationForUser(store, payload.walletAccountId);
           if (!walletInstallation) {
             return { error: 'No claimed wallet installation is available for that wallet account.', statusCode: 409 };
@@ -927,6 +1198,101 @@ export function createAgentWalletApp({
 
         return {
           statusCode: 202,
+          payload: result
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/relay/agent-links') {
+        const { payload, signature } = body;
+
+        if (!payload || !signature) {
+          return {
+            statusCode: 400,
+            payload: { error: 'Agent pairing payload and signature are required.' }
+          };
+        }
+
+        if (!payload.requestId || !payload.agentId || !payload.walletAccountId || !payload.securityCode) {
+          return {
+            statusCode: 400,
+            payload: { error: 'Agent pairing payload is missing required fields.' }
+          };
+        }
+
+        if (!isFreshTimestamp(payload.timestamp)) {
+          return {
+            statusCode: 400,
+            payload: { error: 'Agent pairing timestamp is stale or invalid.' }
+          };
+        }
+
+        const trustedAgent = trustedAgents[payload.agentId];
+        if (!trustedAgent) {
+          return {
+            statusCode: 403,
+            payload: { error: 'Remote agent is not trusted by this relay.' }
+          };
+        }
+
+        if (!verifyPayload(payload, signature, trustedAgent.publicKeyPem)) {
+          return {
+            statusCode: 401,
+            payload: { error: 'Agent pairing signature verification failed.' }
+          };
+        }
+
+        const { store, result } = await storeApi.updateStore((store) => {
+          const user = store.users[payload.walletAccountId];
+          if (!user) {
+            return { error: 'Wallet account not found.', statusCode: 404 };
+          }
+
+          const codeRecord = Object.values(store.agentLinkCodes || {}).find(
+            (candidate) =>
+              candidate.userId === user.id &&
+              candidate.code === String(payload.securityCode).trim()
+          );
+
+          if (!codeRecord || codeRecord.status !== 'active') {
+            return { error: 'Security code is invalid or already used.', statusCode: 403 };
+          }
+
+          if (new Date(codeRecord.expiresAt).getTime() <= Date.now()) {
+            codeRecord.status = 'expired';
+            return { error: 'Security code has expired.', statusCode: 403 };
+          }
+
+          const linkId = `${user.id}:${payload.agentId}`;
+          const existingLink = store.agentLinks[linkId];
+          const linkedAt = nowIsoTimestamp();
+          store.agentLinks[linkId] = {
+            id: linkId,
+            walletAccountId: user.id,
+            walletInstallationId: codeRecord.walletInstallationId,
+            agentId: payload.agentId,
+            label: trustedAgent.label || payload.agentId,
+            linkedAt,
+            createdAt: existingLink?.createdAt || linkedAt
+          };
+
+          codeRecord.status = 'used';
+          codeRecord.usedAt = linkedAt;
+          codeRecord.agentId = payload.agentId;
+          codeRecord.requestId = payload.requestId;
+          codeRecord.nonce = payload.nonce;
+
+          return {
+            link: store.agentLinks[linkId],
+            summary: buildUserSummary(store, user.id)
+          };
+        });
+
+        if (result.error) {
+          return { statusCode: result.statusCode, payload: { error: result.error } };
+        }
+
+        return {
+          statusCode: 201,
           payload: result
         };
       }

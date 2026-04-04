@@ -68,6 +68,8 @@ test('electron shell page exposes a home-first app shell with isolated panels fo
   assert.match(response.body, /data-tab="funding"/);
   assert.match(response.body, /data-tab="settings"/);
   assert.match(response.body, /home-panel/);
+  assert.match(response.body, /wallet-account-id-card/);
+  assert.match(response.body, /Wallet account ID/);
   assert.match(response.body, /requests-panel/);
   assert.match(response.body, /transactions-panel/);
   assert.match(response.body, /controls-panel/);
@@ -90,6 +92,11 @@ test('electron shell page exposes a home-first app shell with isolated panels fo
   assert.match(response.body, />Credit cards</);
   assert.match(response.body, /Your card will not be charged during setup/);
   assert.match(response.body, /Card details are collected securely by Stripe and are not stored by Countersign/);
+  assert.match(response.body, /agent-pairing-code/);
+  assert.match(response.body, /generate-agent-link-code-button/);
+  assert.match(response.body, /linked-agents-list/);
+  assert.match(response.body, />Agent pairing</);
+  assert.match(response.body, /Generate security code/);
   assert.doesNotMatch(response.body, /No USD wallet balance/);
   assert.doesNotMatch(response.body, /fund-form/);
   assert.doesNotMatch(response.body, /generate-claim-token/);

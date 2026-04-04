@@ -166,6 +166,32 @@ async function createHarness() {
   };
 }
 
+async function pairTravelAgent(harness) {
+  const code = await harness.request(`/api/users/${harness.walletAccountId}/agent-link-code`, {
+    method: 'POST'
+  });
+  assert.equal(code.status, 201);
+
+  const pairingPayload = {
+    type: 'agent.wallet_pairing.v1',
+    requestId: `pair_req_${Date.now()}`,
+    agentId: 'travel-agent',
+    walletAccountId: harness.walletAccountId,
+    securityCode: code.data.activeAgentLinkCode.code,
+    timestamp: new Date().toISOString(),
+    nonce: `pair_nonce_${Date.now()}`
+  };
+
+  const paired = await harness.request('/api/relay/agent-links', {
+    method: 'POST',
+    body: {
+      payload: pairingPayload,
+      signature: signPayload(pairingPayload, harness.travelAgentKeys.privateKeyPem)
+    }
+  });
+  assert.equal(paired.status, 201);
+}
+
 test('funding API can create a Stripe setup intent and sync the linked payment method to the local runtime', async () => {
   const harness = await createHarness();
 
@@ -345,6 +371,7 @@ test('funding API rejects Stripe top-ups because the wallet does not custody USD
 
 test('wallet review flow produces a Stripe-backed wallet charge when a linked Stripe payment method exists', async () => {
   const harness = await createHarness();
+  await pairTravelAgent(harness);
 
   const setupIntent = await harness.request(
     `/api/users/${harness.walletAccountId}/local-wallet-installations/${harness.walletInstallationId}/stripe/setup-intent`,

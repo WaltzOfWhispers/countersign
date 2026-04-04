@@ -61,6 +61,32 @@ async function createHarness({ fundAmountCents = 20_000 } = {}) {
   };
 }
 
+async function pairTravelAgent(harness) {
+  const securityCode = await harness.send(`/api/users/${harness.userId}/agent-link-code`, {
+    method: 'POST'
+  });
+  assert.equal(securityCode.status, 201);
+
+  const pairingPayload = {
+    type: 'agent.wallet_pairing.v1',
+    requestId: `pair_req_${Date.now()}`,
+    agentId: 'travel-agent',
+    walletAccountId: harness.userId,
+    securityCode: securityCode.data.activeAgentLinkCode.code,
+    timestamp: new Date().toISOString(),
+    nonce: `pair_nonce_${Date.now()}`
+  };
+
+  const paired = await harness.send('/api/relay/agent-links', {
+    method: 'POST',
+    body: {
+      payload: pairingPayload,
+      signature: signPayload(pairingPayload, harness.travelAgentKeys.privateKeyPem)
+    }
+  });
+  assert.equal(paired.status, 201);
+}
+
 test('wallet daemon client can claim, poll relay requests, and authorize travel-agent charges', async () => {
   const harness = await createHarness();
   const installationKeys = generateEd25519Keypair();
@@ -79,6 +105,7 @@ test('wallet daemon client can claim, poll relay requests, and authorize travel-
   });
 
   assert.equal(claim.walletInstallation.ownerUserId, harness.userId);
+  await pairTravelAgent(harness);
 
   const relayPayload = {
     type: 'travel.payment_authorization_request.v1',
@@ -142,6 +169,7 @@ test('wallet daemon client can run a wallet-side Stripe charge with a linked pay
     walletAccountId: harness.userId,
     claimToken: harness.claimToken
   });
+  await pairTravelAgent(harness);
 
   const relayPayload = {
     type: 'travel.payment_authorization_request.v1',

@@ -46,6 +46,14 @@ export function resolveMcpServerPaths({
 function buildTools() {
   return [
     {
+      name: 'list_wallets',
+      description: 'List wallet accounts available in the shared Countersign store.',
+      inputSchema: {
+        type: 'object',
+        properties: {}
+      }
+    },
+    {
       name: 'create_wallet',
       description: 'Create a new Countersign wallet account.',
       inputSchema: {
@@ -159,7 +167,7 @@ function buildTools() {
     },
     {
       name: 'review_wallet_request',
-      description: 'Approve or reject a pending travel-agent authorization request from the local wallet daemon.',
+      description: 'Legacy low-level tool to approve or reject a pending travel-agent authorization request from a specific local wallet daemon installation.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -173,6 +181,74 @@ function buildTools() {
           reasonCode: { type: 'string' }
         },
         required: ['walletInstallationId', 'walletAccountId', 'relayRequestId', 'decision']
+      }
+    },
+    {
+      name: 'list_wallet_cards',
+      description: 'List the saved cards on the claimed local runtime for a wallet, including the active default card.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          walletAccountId: { type: 'string' }
+        },
+        required: ['walletAccountId']
+      }
+    },
+    {
+      name: 'set_default_wallet_card',
+      description: 'Set the default saved card used for wallet-run charges on the claimed local runtime.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          walletAccountId: { type: 'string' },
+          paymentMethodId: { type: 'string' }
+        },
+        required: ['walletAccountId', 'paymentMethodId']
+      }
+    },
+    {
+      name: 'request_wallet_charge',
+      description: 'Ask the local wallet to evaluate policy and run a charge with the default or selected saved card.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          walletAccountId: { type: 'string' },
+          merchant: { type: 'string' },
+          amountUsd: { type: 'number' },
+          memo: { type: 'string' },
+          bookingReference: { type: 'string' },
+          paymentMethodId: { type: 'string' }
+        },
+        required: ['walletAccountId', 'merchant', 'amountUsd']
+      }
+    },
+    {
+      name: 'list_wallet_requests',
+      description: 'List pending wallet requests for the claimed local runtime behind a wallet account.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          walletAccountId: { type: 'string' }
+        },
+        required: ['walletAccountId']
+      }
+    },
+    {
+      name: 'respond_wallet_request',
+      description: 'Wallet-owner action: approve or reject a pending wallet request for the claimed local runtime behind a wallet account.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          walletAccountId: { type: 'string' },
+          relayRequestId: { type: 'string' },
+          decision: {
+            type: 'string',
+            enum: ['approve', 'reject']
+          },
+          reasonCode: { type: 'string' },
+          paymentMethodId: { type: 'string' }
+        },
+        required: ['walletAccountId', 'relayRequestId', 'decision']
       }
     }
   ];
@@ -216,6 +292,8 @@ export function createMcpServer({
 
   async function handleToolCall(name, args = {}) {
     switch (name) {
+      case 'list_wallets':
+        return toolResult(await controlPlane.listWallets(args));
       case 'create_wallet':
         return toolResult(await controlPlane.createWallet(args));
       case 'get_wallet':
@@ -236,6 +314,16 @@ export function createMcpServer({
         return toolResult(await controlPlane.listPendingWalletRequests(args));
       case 'review_wallet_request':
         return toolResult(await controlPlane.reviewWalletRequest(args));
+      case 'list_wallet_cards':
+        return toolResult(await controlPlane.listWalletCards(args));
+      case 'set_default_wallet_card':
+        return toolResult(await controlPlane.setDefaultWalletCard(args));
+      case 'request_wallet_charge':
+        return toolResult(await controlPlane.requestWalletCharge(args));
+      case 'list_wallet_requests':
+        return toolResult(await controlPlane.listWalletRequests(args));
+      case 'respond_wallet_request':
+        return toolResult(await controlPlane.respondWalletRequest(args));
       default:
         throw new Error(`Unknown tool: ${name}`);
     }

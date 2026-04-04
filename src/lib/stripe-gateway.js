@@ -29,6 +29,7 @@ export function createStripeGateway({
 
   return {
     enabled: Boolean(client && publishableKey),
+    serverEnabled: Boolean(client),
     publishableKey,
     async ensureCustomer({ existingCustomerId, walletAccountId, walletName }) {
       if (!client) {
@@ -72,6 +73,34 @@ export function createStripeGateway({
         customerId
       };
     },
+    async createHostedSetupSession({
+      customerId,
+      walletAccountId,
+      walletInstallationId,
+      returnUrl = 'https://example.com/countersign/stripe-setup-complete?session_id={CHECKOUT_SESSION_ID}',
+      cancelUrl = 'https://example.com/countersign/stripe-setup-cancelled'
+    }) {
+      if (!client) {
+        throw new Error('Stripe is not configured.');
+      }
+
+      const session = await client.checkout.sessions.create({
+        mode: 'setup',
+        customer: customerId,
+        success_url: returnUrl,
+        cancel_url: cancelUrl,
+        metadata: {
+          walletAccountId,
+          walletInstallationId
+        }
+      });
+
+      return {
+        id: session.id,
+        url: session.url,
+        customerId
+      };
+    },
     async getPaymentMethodForSetupIntent({ setupIntentId }) {
       if (!client) {
         throw new Error('Stripe is not configured.');
@@ -89,6 +118,27 @@ export function createStripeGateway({
         typeof setupIntent.payment_method === 'string' ? null : setupIntent.payment_method;
 
       return normalizeCardPaymentMethod(setupIntent, paymentMethod);
+    },
+    async getPaymentMethodForSetupSession({ checkoutSessionId }) {
+      if (!client) {
+        throw new Error('Stripe is not configured.');
+      }
+
+      const session = await client.checkout.sessions.retrieve(checkoutSessionId);
+      if (session.status !== 'complete') {
+        throw new Error('Stripe checkout session is not complete yet.');
+      }
+
+      const setupIntentId =
+        typeof session.setup_intent === 'string'
+          ? session.setup_intent
+          : session.setup_intent?.id;
+
+      if (!setupIntentId) {
+        throw new Error('Stripe checkout session did not produce a setup intent.');
+      }
+
+      return this.getPaymentMethodForSetupIntent({ setupIntentId });
     },
     async createWalletCharge({
       customerId,

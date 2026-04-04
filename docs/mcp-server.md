@@ -28,11 +28,34 @@ This means Claude can:
 - create and optionally fund a wallet
 - set spending policy
 - install a local wallet daemon identity
-- link a local payment-method reference to that daemon
+- start a real Stripe card-link flow for that daemon
+- sync the completed Stripe checkout session back into Countersign
 - claim that daemon to a wallet account
 - inspect pending travel-agent authorization requests
 - approve or reject those requests
-- run the wallet-side Stripe-style charge when approving and a payment method is linked
+- run the wallet-side Stripe charge when approving and a payment method is linked
+
+## Linking A Card From MCP
+
+`link_wallet_payment_method` is a two-step tool:
+
+1. Call it with:
+   - `walletInstallationId`
+   - `walletAccountId`
+
+   Countersign returns:
+   - `checkoutUrl`
+   - `checkoutSessionId`
+   - `nextAction: "complete_stripe_checkout"`
+
+2. Open `checkoutUrl` in a browser and finish the Stripe flow.
+
+3. Call the same tool again with:
+   - `walletInstallationId`
+   - `walletAccountId`
+   - `checkoutSessionId`
+
+   Countersign syncs the real Stripe payment method into the local wallet runtime.
 
 ## Local State
 
@@ -77,4 +100,4 @@ Example MCP config:
 
 This MCP server is local-control-plane oriented. It does not replace the travel-agent SDK. The travel agent still uses the Countersign SDK for remote authorization requests, while Claude uses MCP to act on behalf of the wallet owner locally.
 
-In the current travel-agent wedge, you do not need a preloaded wallet balance if the local wallet daemon has a linked payment method. In that mode, Claude approves the request and the wallet runs the Stripe-style charge locally on behalf of the travel agent.
+In the current travel-agent wedge, you do not need a preloaded wallet balance if the local wallet daemon has a linked payment method. In that mode, Claude approves the request and the wallet runs the Stripe charge locally on behalf of the travel agent.

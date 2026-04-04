@@ -131,17 +131,17 @@ function buildTools() {
     },
     {
       name: 'link_wallet_payment_method',
-      description: 'Link a local mock payment-method reference to a wallet daemon installation for CLI and MCP testing.',
+      description: 'Start or complete a real Stripe card-link flow for a claimed wallet daemon installation.',
       inputSchema: {
         type: 'object',
         properties: {
           walletInstallationId: { type: 'string' },
-          cardBrand: { type: 'string' },
-          cardLast4: { type: 'string' },
-          expMonth: { type: 'number' },
-          expYear: { type: 'number' }
+          walletAccountId: { type: 'string' },
+          checkoutSessionId: { type: 'string' },
+          returnUrl: { type: 'string' },
+          cancelUrl: { type: 'string' }
         },
-        required: ['walletInstallationId']
+        required: ['walletInstallationId', 'walletAccountId']
       }
     },
     {

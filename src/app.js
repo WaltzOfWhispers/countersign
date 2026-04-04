@@ -421,6 +421,62 @@ export function createAgentWalletApp({
         };
       }
 
+      const stripeSetupSessionMatch = pathname.match(
+        /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/stripe\/setup-session$/
+      );
+      if (method === 'POST' && stripeSetupSessionMatch) {
+        if (!stripeGateway.serverEnabled) {
+          return {
+            statusCode: 503,
+            payload: { error: 'Stripe is not configured on this Countersign server.' }
+          };
+        }
+
+        const store = await storeApi.readStore();
+        const user = store.users[stripeSetupSessionMatch[1]];
+        if (!user) {
+          return { statusCode: 404, payload: { error: 'User not found.' } };
+        }
+
+        const walletInstallation = store.walletInstallations[stripeSetupSessionMatch[2]];
+        if (!walletInstallation || walletInstallation.ownerUserId !== user.id) {
+          return {
+            statusCode: 404,
+            payload: { error: 'Claimed wallet installation not found for that wallet account.' }
+          };
+        }
+
+        const customerId = await stripeGateway.ensureCustomer({
+          existingCustomerId: user.wallet.stripeCustomerId,
+          walletAccountId: user.id,
+          walletName: user.name
+        });
+        const setupSession = await stripeGateway.createHostedSetupSession({
+          customerId,
+          walletAccountId: user.id,
+          walletInstallationId: walletInstallation.id,
+          returnUrl: body.returnUrl,
+          cancelUrl: body.cancelUrl
+        });
+
+        await storeApi.updateStore((store) => {
+          const storedUser = store.users[user.id];
+          if (storedUser) {
+            storedUser.wallet.stripeCustomerId = customerId;
+          }
+        });
+
+        return {
+          statusCode: 201,
+          payload: {
+            provider: 'stripe_checkout',
+            customerId,
+            checkoutSessionId: setupSession.id,
+            checkoutUrl: setupSession.url
+          }
+        };
+      }
+
       const stripePaymentMethodMatch = pathname.match(
         /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/payment-method\/stripe$/
       );
@@ -455,6 +511,65 @@ export function createAgentWalletApp({
 
         const paymentMethod = await stripeGateway.getPaymentMethodForSetupIntent({
           setupIntentId: body.setupIntentId
+        });
+        const result = await localControlPlane.linkWalletPaymentMethod({
+          walletInstallationId: walletInstallation.id,
+          paymentMethod
+        });
+
+        await storeApi.updateStore((store) => {
+          const storedUser = store.users[user.id];
+          if (storedUser) {
+            storedUser.wallet.stripeCustomerId =
+              paymentMethod.customerId || storedUser.wallet.stripeCustomerId || null;
+          }
+        });
+
+        return {
+          statusCode: 200,
+          payload: {
+            walletInstallation: result.installation,
+            dashboard: await localControlPlane.getLocalDashboard({
+              walletAccountId: user.id
+            })
+          }
+        };
+      }
+
+      const stripePaymentMethodSessionMatch = pathname.match(
+        /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/payment-method\/stripe-session$/
+      );
+      if (method === 'POST' && stripePaymentMethodSessionMatch) {
+        if (!stripeGateway.serverEnabled) {
+          return {
+            statusCode: 503,
+            payload: { error: 'Stripe is not configured on this Countersign server.' }
+          };
+        }
+
+        if (!body.checkoutSessionId) {
+          return {
+            statusCode: 400,
+            payload: { error: 'checkoutSessionId is required to link a Stripe payment method.' }
+          };
+        }
+
+        const store = await storeApi.readStore();
+        const user = store.users[stripePaymentMethodSessionMatch[1]];
+        if (!user) {
+          return { statusCode: 404, payload: { error: 'User not found.' } };
+        }
+
+        const walletInstallation = store.walletInstallations[stripePaymentMethodSessionMatch[2]];
+        if (!walletInstallation || walletInstallation.ownerUserId !== user.id) {
+          return {
+            statusCode: 404,
+            payload: { error: 'Claimed wallet installation not found for that wallet account.' }
+          };
+        }
+
+        const paymentMethod = await stripeGateway.getPaymentMethodForSetupSession({
+          checkoutSessionId: body.checkoutSessionId
         });
         const result = await localControlPlane.linkWalletPaymentMethod({
           walletInstallationId: walletInstallation.id,

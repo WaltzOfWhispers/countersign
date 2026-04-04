@@ -2,7 +2,6 @@ import { join } from 'node:path';
 
 import { createAgentWalletApp } from '../app.js';
 import { createLocalWalletControlPlane } from '../lib/local-control-plane.js';
-import { runMockStripeWalletCharge } from '../lib/payment-rails.js';
 import { createStripeGateway } from '../lib/stripe-gateway.js';
 
 function centsFromUsd(value, fieldName) {
@@ -72,17 +71,6 @@ export function createCountersignControlPlane({
           walletAccountId,
           agentId: relayRequest.payload.agentId,
           relayRequestId: relayRequest.requestId
-        });
-      }
-
-      if (installation.paymentMethod.provider === 'mock_stripe_payment_method') {
-        return runMockStripeWalletCharge({
-          amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
-          currency: relayRequest.payload.amount?.currency || 'USD',
-          walletAccountId,
-          agentId: relayRequest.payload.agentId,
-          relayRequestId: relayRequest.requestId,
-          paymentMethod: installation.paymentMethod
         });
       }
 
@@ -176,18 +164,65 @@ export function createCountersignControlPlane({
 
   async function linkWalletPaymentMethod({
     walletInstallationId,
-    cardBrand = 'visa',
-    cardLast4 = '4242',
-    expMonth = 12,
-    expYear = 2030
+    walletAccountId,
+    checkoutSessionId,
+    returnUrl,
+    cancelUrl
   }) {
-    return localControlPlane.linkWalletPaymentMethod({
+    await initialize();
+
+    if (!stripeGateway.serverEnabled) {
+      throw new Error('Stripe is not configured on this Countersign server.');
+    }
+
+    if (!walletAccountId) {
+      throw new Error('walletAccountId is required to link a real Stripe payment method.');
+    }
+
+    if (!checkoutSessionId) {
+      const response = await send(
+        `/api/users/${walletAccountId}/local-wallet-installations/${walletInstallationId}/stripe/setup-session`,
+        {
+          method: 'POST',
+          body: {
+            returnUrl,
+            cancelUrl
+          }
+        }
+      );
+
+      if (response.status >= 400) {
+        throw new Error(response.data?.error || 'Failed to start Stripe setup session.');
+      }
+
+      return {
+        walletInstallationId,
+        walletAccountId,
+        nextAction: 'complete_stripe_checkout',
+        ...response.data
+      };
+    }
+
+    const response = await send(
+      `/api/users/${walletAccountId}/local-wallet-installations/${walletInstallationId}/payment-method/stripe-session`,
+      {
+        method: 'POST',
+        body: {
+          checkoutSessionId
+        }
+      }
+    );
+
+    if (response.status >= 400) {
+      throw new Error(response.data?.error || 'Failed to sync Stripe payment method.');
+    }
+
+    return {
       walletInstallationId,
-      cardBrand,
-      cardLast4,
-      expMonth,
-      expYear
-    });
+      walletAccountId,
+      nextAction: 'completed',
+      ...response.data
+    };
   }
 
   async function listPendingWalletRequests({ walletInstallationId }) {

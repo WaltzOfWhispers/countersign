@@ -75,6 +75,7 @@ test('electron shell page exposes a home-first app shell with isolated panels fo
   assert.match(response.body, /id="home-panel" class="tab-panel active"/);
   assert.match(response.body, /id="requests-panel" class="tab-panel" hidden/);
   assert.match(response.body, /id="funding-panel" class="tab-panel" hidden/);
+  assert.match(response.body, /stripe-config-status/);
   assert.match(response.body, /stripe-payment-form/);
   assert.match(response.body, /stripe-payment-element/);
   assert.doesNotMatch(response.body, /fund-form/);

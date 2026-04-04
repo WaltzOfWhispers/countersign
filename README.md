@@ -63,6 +63,12 @@ If you want the MCP server to use a different store location, set:
 
 The MCP-specific setup doc is in [docs/mcp-server.md](/Users/christycui/Documents/agent_wallet/docs/mcp-server.md).
 
+`link_wallet_payment_method` is now a two-step real Stripe flow for Claude and CLI:
+
+1. call it with `walletInstallationId` and `walletAccountId`
+2. open the returned `checkoutUrl` in a browser and complete Stripe checkout
+3. call it again with the same ids plus `checkoutSessionId` to sync the saved payment method back into Countersign
+
 ## SDK Setup
 
 The travel-agent SDK is the right surface for your separate travel agent repo. It wraps the signed relay protocol so the travel agent does not have to reimplement canonical JSON signing, relay request construction, or wallet receipt verification itself.
@@ -121,7 +127,7 @@ Countersign takes the position that an agent payment system should be explicit a
 
 ## How It Works
 
-In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked through a SetupIntent from the desktop app. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The Stripe card is the funding instrument for wallet-run charges; Countersign does not custody a stored USD balance in this desktop flow.
+In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked either through Stripe Elements in the desktop app or through a hosted Stripe checkout flow for CLI and MCP. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The Stripe card is the funding instrument for wallet-run charges; Countersign does not custody a stored USD balance in this desktop flow.
 
 That means the approval path and the charge path are anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
@@ -186,10 +192,16 @@ npm run desktop:start
 npm run wallet:install -- --label "CLI daemon"
 ```
 
-5. CLI fallback: link a local mock payment method reference:
+5. CLI fallback: start a real Stripe card-link session:
 
 ```bash
-npm run wallet:link-payment-method -- --wallet <wallet-installation-id> --card-brand visa --card-last4 4242 --exp-month 12 --exp-year 2030
+npm run wallet:link-payment-method -- --server http://localhost:3000 --wallet <wallet-installation-id> --wallet-account-id <wallet-id>
+```
+
+That prints a Stripe `checkoutUrl` and `checkoutSessionId`. Open the URL, complete Stripe checkout, then sync it:
+
+```bash
+npm run wallet:link-payment-method -- --server http://localhost:3000 --wallet <wallet-installation-id> --wallet-account-id <wallet-id> --checkout-session-id <checkout-session-id>
 ```
 
 6. CLI fallback: claim it to the wallet account:

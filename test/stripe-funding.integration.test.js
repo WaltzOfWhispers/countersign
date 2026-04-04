@@ -12,6 +12,7 @@ function createFakeStripeGateway() {
 
   return {
     enabled: true,
+    serverEnabled: true,
     publishableKey: 'pk_test_countersign',
     calls,
     async ensureCustomer({ existingCustomerId, walletAccountId }) {
@@ -31,6 +32,19 @@ function createFakeStripeGateway() {
         customerId
       };
     },
+    async createHostedSetupSession({ customerId, walletAccountId, walletInstallationId }) {
+      calls.push({
+        type: 'createHostedSetupSession',
+        customerId,
+        walletAccountId,
+        walletInstallationId
+      });
+      return {
+        id: `cs_${walletInstallationId}`,
+        url: `https://checkout.stripe.test/${walletInstallationId}`,
+        customerId
+      };
+    },
     async getPaymentMethodForSetupIntent({ setupIntentId }) {
       calls.push({ type: 'getPaymentMethodForSetupIntent', setupIntentId });
       return {
@@ -38,6 +52,19 @@ function createFakeStripeGateway() {
         customerId: 'cus_wallet_stripe_1',
         paymentMethodId: 'pm_wallet_stripe_1',
         setupIntentId,
+        cardBrand: 'visa',
+        cardLast4: '4242',
+        expMonth: 12,
+        expYear: 2030
+      };
+    },
+    async getPaymentMethodForSetupSession({ checkoutSessionId }) {
+      calls.push({ type: 'getPaymentMethodForSetupSession', checkoutSessionId });
+      return {
+        provider: 'stripe_payment_method',
+        customerId: 'cus_wallet_stripe_1',
+        paymentMethodId: 'pm_wallet_stripe_1',
+        setupIntentId: `seti_from_${checkoutSessionId}`,
         cardBrand: 'visa',
         cardLast4: '4242',
         expMonth: 12,
@@ -174,6 +201,49 @@ test('funding API can create a Stripe setup intent and sync the linked payment m
   assert.equal(
     linked.data.dashboard.localWalletInstallations[0].paymentMethod.paymentMethodId,
     'pm_wallet_stripe_1'
+  );
+});
+
+test('funding API can start a hosted Stripe setup session and sync the linked payment method to the local runtime', async () => {
+  const harness = await createHarness();
+
+  const setupSession = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${harness.walletInstallationId}/stripe/setup-session`,
+    {
+      method: 'POST'
+    }
+  );
+
+  assert.equal(setupSession.status, 201);
+  assert.equal(setupSession.data.provider, 'stripe_checkout');
+  assert.equal(setupSession.data.checkoutSessionId, `cs_${harness.walletInstallationId}`);
+  assert.equal(
+    setupSession.data.checkoutUrl,
+    `https://checkout.stripe.test/${harness.walletInstallationId}`
+  );
+
+  const linked = await harness.request(
+    `/api/users/${harness.walletAccountId}/local-wallet-installations/${harness.walletInstallationId}/payment-method/stripe-session`,
+    {
+      method: 'POST',
+      body: {
+        checkoutSessionId: setupSession.data.checkoutSessionId
+      }
+    }
+  );
+
+  assert.equal(linked.status, 200);
+  assert.equal(
+    linked.data.walletInstallation.paymentMethod.provider,
+    'stripe_payment_method'
+  );
+  assert.equal(
+    harness.stripeGateway.calls.some((call) => call.type === 'createHostedSetupSession'),
+    true
+  );
+  assert.equal(
+    harness.stripeGateway.calls.some((call) => call.type === 'getPaymentMethodForSetupSession'),
+    true
   );
 });
 

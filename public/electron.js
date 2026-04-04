@@ -16,6 +16,7 @@ const elements = {
   allowedMerchants: document.querySelector('#allowed-merchants'),
   createWalletForm: document.querySelector('#create-wallet-form'),
   walletName: document.querySelector('#wallet-name'),
+  stripeConfigStatus: document.querySelector('#stripe-config-status'),
   fundingPaymentMethodSummary: document.querySelector('#funding-payment-method-summary'),
   createStripeSetupButton: document.querySelector('#create-stripe-setup-button'),
   stripePaymentForm: document.querySelector('#stripe-payment-form'),
@@ -26,6 +27,7 @@ const elements = {
 };
 
 const state = {
+  meta: null,
   walletCatalog: [],
   summary: null,
   localWalletInstallations: [],
@@ -270,6 +272,30 @@ function renderFundingPaymentMethod() {
   `;
 }
 
+function renderStripeConfiguration() {
+  const stripeEnabled = Boolean(state.meta?.stripe?.enabled);
+
+  if (!stripeEnabled) {
+    elements.stripeConfigStatus.className = 'callout muted';
+    elements.stripeConfigStatus.innerHTML = `
+      <strong>Stripe is not configured on this local server.</strong>
+      <p class="meta">Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_PUBLISHABLE_KEY</code>, then restart the desktop app.</p>
+    `;
+    elements.createStripeSetupButton.disabled = true;
+    elements.createStripeSetupButton.title = 'Stripe keys are missing on this local server.';
+    elements.stripePaymentForm.hidden = true;
+    return;
+  }
+
+  elements.stripeConfigStatus.className = 'callout';
+  elements.stripeConfigStatus.innerHTML = `
+    <strong>Stripe is configured.</strong>
+    <p class="meta">You can set up a card with Stripe and use it for approved wallet-run charges.</p>
+  `;
+  elements.createStripeSetupButton.disabled = false;
+  elements.createStripeSetupButton.title = '';
+}
+
 function renderApprovals() {
   const pendingRequests = state.localWalletInstallations.flatMap((installation) =>
     installation.pendingRequests.map((request) => ({
@@ -315,8 +341,13 @@ function render() {
   renderPolicy();
   renderTransactions();
   renderRuntime();
+  renderStripeConfiguration();
   renderFundingPaymentMethod();
   renderApprovals();
+}
+
+async function loadMeta() {
+  state.meta = await requestJson('/api/meta');
 }
 
 async function loadWalletCatalog() {
@@ -352,6 +383,7 @@ async function ensureRuntimeIfNeeded(userId) {
 }
 
 async function loadState() {
+  await loadMeta();
   await loadWalletCatalog();
 
   let userId = currentUserId();
@@ -523,6 +555,14 @@ elements.createWalletForm.addEventListener('submit', async (event) => {
 elements.createStripeSetupButton.addEventListener('click', async () => {
   if (!currentUserId()) {
     setBanner('Load a wallet before linking a Stripe payment method.', 'error');
+    return;
+  }
+
+  if (!state.meta?.stripe?.enabled) {
+    setBanner(
+      'Stripe is not configured on this local server. Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY, then restart Countersign.',
+      'error'
+    );
     return;
   }
 

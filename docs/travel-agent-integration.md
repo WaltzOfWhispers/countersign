@@ -289,7 +289,7 @@ Successful response after wallet approval and charge:
   },
   "execution": {
     "id": "charge_...",
-    "provider": "mock_stripe_wallet_charge",
+    "provider": "stripe_wallet_charge",
     "providerReference": "pi_...",
     "status": "succeeded",
     "amountCents": 2450,
@@ -498,7 +498,7 @@ These are known MVP gaps:
 - no self-serve travel-agent registration yet
 - no explicit user-to-travel-agent linking screen yet
 - relay is polling, not a persistent daemon connection
-- wallet-side charge uses a mock Stripe layer, not real Stripe APIs
+- wallet-side charge uses real Stripe APIs when the user has linked a Stripe payment method
 - replay protection is freshness-based plus request-id uniqueness, not a hardened distributed nonce service
 
 ## Recommended Next Implementation Step For Travel Agent Repo

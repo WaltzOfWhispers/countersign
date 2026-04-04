@@ -90,35 +90,6 @@ export function createStripeGateway({
 
       return normalizeCardPaymentMethod(setupIntent, paymentMethod);
     },
-    async createFundingCharge({ customerId, paymentMethodId, amountCents, walletAccountId }) {
-      if (!client) {
-        throw new Error('Stripe is not configured.');
-      }
-
-      const paymentIntent = await client.paymentIntents.create({
-        amount: amountCents,
-        currency: 'usd',
-        customer: customerId,
-        payment_method: paymentMethodId,
-        confirm: true,
-        off_session: true,
-        metadata: {
-          walletAccountId,
-          purpose: 'wallet_top_up'
-        }
-      });
-
-      return {
-        id: createId('fund'),
-        provider: 'stripe',
-        providerReference: paymentIntent.id,
-        status: paymentIntent.status,
-        amountCents,
-        customerId,
-        paymentMethodId,
-        createdAt: nowIsoTimestamp()
-      };
-    },
     async createWalletCharge({
       customerId,
       paymentMethodId,

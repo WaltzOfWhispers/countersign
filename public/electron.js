@@ -16,8 +16,6 @@ const elements = {
   allowedMerchants: document.querySelector('#allowed-merchants'),
   createWalletForm: document.querySelector('#create-wallet-form'),
   walletName: document.querySelector('#wallet-name'),
-  fundForm: document.querySelector('#fund-form'),
-  fundAmount: document.querySelector('#fund-amount'),
   fundingPaymentMethodSummary: document.querySelector('#funding-payment-method-summary'),
   createStripeSetupButton: document.querySelector('#create-stripe-setup-button'),
   stripePaymentForm: document.querySelector('#stripe-payment-form'),
@@ -107,8 +105,7 @@ function renderWalletCatalog() {
   elements.existingWalletSelect.innerHTML = [
     '<option value="">Select a wallet from the local store</option>',
     ...state.walletCatalog.map(
-      (wallet) =>
-        `<option value="${wallet.id}">${wallet.name} · ${wallet.id} · ${formatUsd(wallet.balanceCents)}</option>`
+      (wallet) => `<option value="${wallet.id}">${wallet.name} · ${wallet.id}</option>`
     )
   ].join('');
   elements.existingWalletSelect.value = selectedWalletId;
@@ -124,6 +121,10 @@ function renderWalletSummary() {
   }
 
   const { summary } = state;
+  const runtime = claimedRuntime();
+  const linkedCard = runtime?.paymentMethod
+    ? `${runtime.paymentMethod.cardBrand.toUpperCase()} •••• ${runtime.paymentMethod.cardLast4}`
+    : 'No card linked';
   elements.walletSummary.classList.remove('empty');
   elements.walletId.textContent = summary.user.id;
   elements.walletSummary.innerHTML = `
@@ -132,8 +133,8 @@ function renderWalletSummary() {
       <span class="metric-value">${summary.user.name}</span>
     </div>
     <div class="metric">
-      <span class="metric-label">Stored balance</span>
-      <span class="metric-value">${formatUsd(summary.wallet.balanceCents)}</span>
+      <span class="metric-label">Linked card</span>
+      <span class="metric-value">${linkedCard}</span>
     </div>
     <div class="metric">
       <span class="metric-label">Claimed runtimes</span>
@@ -514,28 +515,6 @@ elements.createWalletForm.addEventListener('submit', async (event) => {
     await loadState();
     activateTab('settings');
     setBanner(`Created wallet ${summary.user.id} and started the local runtime.`);
-  } catch (error) {
-    setBanner(error.message, 'error');
-  }
-});
-
-elements.fundForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-
-  if (!currentUserId()) {
-    setBanner('Load a wallet before funding it.', 'error');
-    return;
-  }
-
-  try {
-    await requestJson(`/api/users/${currentUserId()}/fund`, {
-      method: 'POST',
-      body: { amountCents: dollarsToCents(elements.fundAmount.value) }
-    });
-    elements.fundAmount.value = '';
-    await loadState();
-    activateTab('funding');
-    setBanner('Stored balance increased.');
   } catch (error) {
     setBanner(error.message, 'error');
   }

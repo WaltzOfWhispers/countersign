@@ -6,7 +6,6 @@ import { generateEd25519Keypair, signPayload, verifyPayload } from './lib/crypto
 import { createId, nowIsoTimestamp } from './lib/ids.js';
 import { createLocalWalletControlPlane } from './lib/local-control-plane.js';
 import { createStripeGateway } from './lib/stripe-gateway.js';
-import { createWalletInstallationStore } from './lib/wallet-installation-files.js';
 import {
   runMockCrossmintCharge,
   runMockStripeTopUp,
@@ -175,7 +174,6 @@ export function createAgentWalletApp({
   stripeGateway = createStripeGateway()
 } = {}) {
   const storeApi = createStore(dataFile);
-  const walletInstallationStore = createWalletInstallationStore({ walletDir });
 
   async function executeWalletCharge({ installation, walletAccountId, relayRequest }) {
     if (!installation.paymentMethod) {
@@ -555,38 +553,14 @@ export function createAgentWalletApp({
           throw new Error('USER_NOT_FOUND');
         }
 
-        let fundingEvent = null;
         if (stripeGateway.enabled) {
-          const latestInstallation = getLatestWalletInstallationForUser(store, user.id);
-          if (!latestInstallation) {
-            return {
-              statusCode: 409,
-              payload: { error: 'Link a claimed agent wallet before funding it with Stripe.' }
-            };
-          }
-
-          let localInstallation = null;
-          try {
-            localInstallation = (
-              await walletInstallationStore.loadWalletInstallation(latestInstallation.id)
-            ).installation;
-          } catch {
-            localInstallation = null;
-          }
-
-          if (!localInstallation?.paymentMethod || localInstallation.paymentMethod.provider !== 'stripe_payment_method') {
-            return {
-              statusCode: 409,
-              payload: { error: 'Link a Stripe payment method in Funding before topping up the wallet.' }
-            };
-          }
-
-          fundingEvent = await stripeGateway.createFundingCharge({
-            customerId: localInstallation.paymentMethod.customerId || user.wallet.stripeCustomerId,
-            paymentMethodId: localInstallation.paymentMethod.paymentMethodId,
-            amountCents,
-            walletAccountId: user.id
-          });
+          return {
+            statusCode: 409,
+            payload: {
+              error:
+                'Countersign does not support USD top-ups. Link a Stripe payment method and let approved requests charge it directly.'
+            }
+          };
         }
 
         const { store: updatedStore } = await storeApi.updateStore((store) => {
@@ -595,12 +569,9 @@ export function createAgentWalletApp({
             throw new Error('USER_NOT_FOUND');
           }
 
-          const appliedFundingEvent = fundingEvent || runMockStripeTopUp({ amountCents });
+          const appliedFundingEvent = runMockStripeTopUp({ amountCents });
           user.wallet.balanceCents += amountCents;
           user.wallet.fundingEvents.unshift(appliedFundingEvent);
-          if (fundingEvent?.customerId) {
-            user.wallet.stripeCustomerId = fundingEvent.customerId;
-          }
         });
 
         return { statusCode: 200, payload: buildUserSummary(updatedStore, fundMatch[1]) };

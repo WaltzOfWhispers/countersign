@@ -167,17 +167,17 @@
                   <div class="panel-header">
                     <div>
                       <p class="panel-kicker">Funding</p>
-                      <h2>Wallet balance</h2>
+                      <h2>How this wallet charges</h2>
                     </div>
                   </div>
 
-                  <form id="fund-form" class="inline-form">
-                    <label>
-                      <span>Amount in USD</span>
-                      <input id="fund-amount" type="number" min="1" step="0.01" placeholder="250.00" />
-                    </label>
-                    <button class="button" type="submit">Top Up Wallet</button>
-                  </form>
+                  <div class="callout">
+                    <strong>No USD wallet balance</strong>
+                    <p class="meta">
+                      Countersign does not custody a stored USD balance. Instead, approved travel-agent
+                      requests charge the Stripe card linked to this local agent wallet runtime.
+                    </p>
+                  </div>
                 </article>
               </section>
 
@@ -192,7 +192,7 @@
 
                   <p class="meta">
                     Save a card with Stripe and attach the resulting payment method to this local
-                    agent wallet for top-ups and wallet-side charges.
+                    agent wallet for wallet-side charges.
                   </p>
 
                   <div id="funding-payment-method-summary" class="callout muted">

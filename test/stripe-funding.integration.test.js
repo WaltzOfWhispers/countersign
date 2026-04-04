@@ -44,25 +44,6 @@ function createFakeStripeGateway() {
         expYear: 2030
       };
     },
-    async createFundingCharge({ customerId, paymentMethodId, amountCents, walletAccountId }) {
-      calls.push({
-        type: 'createFundingCharge',
-        customerId,
-        paymentMethodId,
-        amountCents,
-        walletAccountId
-      });
-      return {
-        id: 'fund_stripe_1',
-        provider: 'stripe',
-        providerReference: 'pi_fund_wallet_1',
-        status: 'succeeded',
-        amountCents,
-        customerId,
-        paymentMethodId,
-        createdAt: '2026-04-03T23:59:00.000Z'
-      };
-    },
     async createWalletCharge({
       customerId,
       paymentMethodId,
@@ -196,7 +177,7 @@ test('funding API can create a Stripe setup intent and sync the linked payment m
   );
 });
 
-test('funding API uses the linked Stripe payment method for wallet top-ups', async () => {
+test('funding API rejects Stripe top-ups because the wallet does not custody USD balances', async () => {
   const harness = await createHarness();
 
   const setupIntent = await harness.request(
@@ -225,13 +206,11 @@ test('funding API uses the linked Stripe payment method for wallet top-ups', asy
     }
   });
 
-  assert.equal(funded.status, 200);
-  assert.equal(funded.data.wallet.balanceCents, 12_500);
-  assert.equal(funded.data.wallet.fundingEvents[0].provider, 'stripe');
-  assert.equal(funded.data.wallet.fundingEvents[0].paymentMethodId, 'pm_wallet_stripe_1');
+  assert.equal(funded.status, 409);
+  assert.match(funded.data.error, /does not support usd top-ups/i);
   assert.equal(
     harness.stripeGateway.calls.some((call) => call.type === 'createFundingCharge'),
-    true
+    false
   );
 });
 

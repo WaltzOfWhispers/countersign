@@ -66,7 +66,7 @@ function buildTools() {
     },
     {
       name: 'fund_wallet',
-      description: 'Top up a wallet balance. Uses Stripe when the local server is configured for it, otherwise uses the local mock funding path.',
+      description: 'Top up the legacy mock wallet balance used by non-desktop test flows. The desktop Stripe wallet path does not support USD top-ups.',
       inputSchema: {
         type: 'object',
         properties: {

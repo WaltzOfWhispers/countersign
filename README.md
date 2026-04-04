@@ -8,7 +8,7 @@ Countersign is built around that gap. The travel agent signs the payment request
 
 For the current travel-agent wedge, the wallet can hold a real Stripe payment method linked from the local desktop app. That means the travel agent asks Countersign for approval, the wallet approves, and the wallet runs the charge on behalf of the travel agent. The travel agent remains the merchant. Countersign remains the trust and payment-orchestration layer.
 
-The local agent wallet app is now part of that loop, not just a read-only admin page. Once the desktop app is running, you can create the wallet, attach a Stripe card from the Funding tab, optionally top up a stored balance, and review live travel-agent requests from one local surface.
+The local agent wallet app is now part of that loop, not just a read-only admin page. Once the desktop app is running, you can create the wallet, attach a Stripe card from the Funding tab, and review live travel-agent requests from one local surface.
 
 ## MCP Setup
 
@@ -121,7 +121,7 @@ Countersign takes the position that an agent payment system should be explicit a
 
 ## How It Works
 
-In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked through a SetupIntent from the desktop app. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The stored wallet balance remains optional in this path; the Stripe card is the funding instrument for wallet-run charges.
+In the current wedge, the user installs a local wallet daemon and claims it to a wallet account. That daemon has its own persistent Ed25519 keypair and can hold a Stripe payment method linked through a SetupIntent from the desktop app. Separately, the remote travel agent backend has its own keypair. When the travel agent wants to charge the user, it sends a signed authorization request through the relay. The wallet daemon polls the relay, verifies the travel agent's signature, evaluates the user's local policy, and returns a signed authorization receipt. If the wallet has a linked payment method, it also runs the Stripe charge on behalf of the travel agent and returns that execution result through the relay. The Stripe card is the funding instrument for wallet-run charges; Countersign does not custody a stored USD balance in this desktop flow.
 
 That means the approval path and the charge path are anchored in the user's local wallet, not in the relay and not in the travel agent backend. The relay makes remote reachability possible. It does not replace wallet trust.
 
@@ -177,9 +177,9 @@ npm run desktop:start
    - `Requests` for pending travel-agent approvals
    - `Transactions` for the ledger
    - `Spending Controls` for policy
-   - `Funding` to link a Stripe card and optionally top up the stored balance
+   - `Funding` to link a Stripe card for direct wallet-run charges
    - `Settings` to create wallets and inspect the local runtime
-3. If you do not set Stripe keys, Funding falls back to the local mock top-up flow and Stripe card setup is unavailable.
+3. If you do not set Stripe keys, the Funding tab cannot start Stripe card setup.
 4. If you want the CLI path instead of the desktop app, install a local wallet daemon:
 
 ```bash

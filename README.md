@@ -1,18 +1,24 @@
 # Countersign
 
-Countersign is a local agent wallet.
+Most agent wallets are session-bound.
 
-It gives you one desktop app to manage:
+They can make payments while one run is active, but they do not give the agent a durable wallet surface the user can actually manage and trust.
+
+Countersign is a local agent wallet. It gives Claude and other agents one place to manage identity, payment methods, spending controls, incoming requests, and transaction history.
+
+It gives you one local wallet to manage:
 
 - payment methods
 - spending controls
 - incoming payment requests
 - transaction history
 
-Claude can use the same wallet through MCP, and a remote agent can request payment by sending a signed request to Countersign and waiting for wallet approval.
+Claude can use the same wallet through MCP, and another agent can request payment through Countersign and wait for wallet approval.
 
 ![Countersign desktop app](./docs/countersign-desktop-home.png)
 ![Countersign pending requests](./docs/countersign-desktop-requests.png)
+![Countersign funding](./docs/countersign-desktop-funding.png)
+![Countersign spending controls](./docs/countersign-desktop-controls.png)
 
 ## What It Is
 

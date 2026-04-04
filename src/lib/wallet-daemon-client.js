@@ -25,7 +25,7 @@ function normalizeTransportResponse(response) {
   throw new Error('Transport returned an unexpected response shape.');
 }
 
-export function createWalletDaemonClient({ send }) {
+export function createWalletDaemonClient({ send, executeCharge } = {}) {
   async function call(pathname, options) {
     const response = await send(pathname, options);
     return normalizeTransportResponse(response);
@@ -98,17 +98,25 @@ export function createWalletDaemonClient({ send }) {
     status = 'approved',
     reasonCode = 'policy_passed'
   }) {
-    const execution =
-      status === 'approved' && installation.paymentMethod
-        ? runMockStripeWalletCharge({
-            amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
-            currency: relayRequest.payload.amount?.currency || 'USD',
-            walletAccountId,
-            agentId: relayRequest.payload.agentId,
-            relayRequestId: relayRequest.requestId,
-            paymentMethod: installation.paymentMethod
-          })
-        : undefined;
+    let execution;
+    if (status === 'approved' && installation.paymentMethod) {
+      if (executeCharge) {
+        execution = await executeCharge({
+          installation,
+          walletAccountId,
+          relayRequest
+        });
+      } else if (installation.paymentMethod.provider === 'mock_stripe_payment_method') {
+        execution = runMockStripeWalletCharge({
+          amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
+          currency: relayRequest.payload.amount?.currency || 'USD',
+          walletAccountId,
+          agentId: relayRequest.payload.agentId,
+          relayRequestId: relayRequest.requestId,
+          paymentMethod: installation.paymentMethod
+        });
+      }
+    }
 
     const payload = {
       type: 'wallet.travel_authorization.v1',

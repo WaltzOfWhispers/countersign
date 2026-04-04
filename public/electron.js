@@ -18,11 +18,10 @@ const elements = {
   walletName: document.querySelector('#wallet-name'),
   fundForm: document.querySelector('#fund-form'),
   fundAmount: document.querySelector('#fund-amount'),
-  paymentMethodForm: document.querySelector('#payment-method-form'),
-  cardBrand: document.querySelector('#card-brand'),
-  cardLast4: document.querySelector('#card-last4'),
-  cardExpMonth: document.querySelector('#card-exp-month'),
-  cardExpYear: document.querySelector('#card-exp-year'),
+  fundingPaymentMethodSummary: document.querySelector('#funding-payment-method-summary'),
+  createStripeSetupButton: document.querySelector('#create-stripe-setup-button'),
+  stripePaymentForm: document.querySelector('#stripe-payment-form'),
+  stripePaymentElement: document.querySelector('#stripe-payment-element'),
   walletInstallationsList: document.querySelector('#wallet-installations-list'),
   tabButtons: Array.from(document.querySelectorAll('.tab-button')),
   tabPanels: Array.from(document.querySelectorAll('.tab-panel'))
@@ -32,7 +31,8 @@ const state = {
   walletCatalog: [],
   summary: null,
   localWalletInstallations: [],
-  autoRefreshTimer: null
+  autoRefreshTimer: null,
+  stripeSetup: null
 };
 
 function currentUserId() {
@@ -249,6 +249,26 @@ function renderRuntime() {
   `;
 }
 
+function renderFundingPaymentMethod() {
+  const runtime = claimedRuntime();
+  const paymentMethod = runtime?.paymentMethod || null;
+
+  if (!paymentMethod) {
+    elements.fundingPaymentMethodSummary.className = 'callout muted';
+    elements.fundingPaymentMethodSummary.textContent = 'No Stripe payment method linked yet.';
+    return;
+  }
+
+  elements.fundingPaymentMethodSummary.className = 'callout';
+  elements.fundingPaymentMethodSummary.innerHTML = `
+    <div class="row">
+      <strong>Linked payment method</strong>
+      <span class="pill subtle">${paymentMethod.provider.replaceAll('_', ' ')}</span>
+    </div>
+    <p class="meta">${paymentMethod.cardBrand.toUpperCase()} •••• ${paymentMethod.cardLast4} expires ${String(paymentMethod.expMonth).padStart(2, '0')}/${paymentMethod.expYear}</p>
+  `;
+}
+
 function renderApprovals() {
   const pendingRequests = state.localWalletInstallations.flatMap((installation) =>
     installation.pendingRequests.map((request) => ({
@@ -294,6 +314,7 @@ function render() {
   renderPolicy();
   renderTransactions();
   renderRuntime();
+  renderFundingPaymentMethod();
   renderApprovals();
 }
 
@@ -375,6 +396,16 @@ async function loadSelectedWallet(userId) {
   await loadState();
 }
 
+function resetStripeSetup() {
+  if (state.stripeSetup?.paymentElement?.unmount) {
+    state.stripeSetup.paymentElement.unmount();
+  }
+
+  state.stripeSetup = null;
+  elements.stripePaymentElement.replaceChildren();
+  elements.stripePaymentForm.hidden = true;
+}
+
 function activateTab(tabName) {
   elements.tabButtons.forEach((button) => {
     const isActive = button.dataset.tab === tabName;
@@ -397,8 +428,10 @@ elements.existingWalletSelect.addEventListener('change', async () => {
   try {
     await loadSelectedWallet(elements.existingWalletSelect.value);
     if (elements.existingWalletSelect.value) {
+      resetStripeSetup();
       setBanner(`Loaded wallet ${elements.existingWalletSelect.value}.`);
     } else {
+      resetStripeSetup();
       setBanner('Cleared the wallet selection.');
     }
   } catch (error) {
@@ -508,36 +541,97 @@ elements.fundForm.addEventListener('submit', async (event) => {
   }
 });
 
-elements.paymentMethodForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-
+elements.createStripeSetupButton.addEventListener('click', async () => {
   if (!currentUserId()) {
-    setBanner('Load a wallet before linking a payment method.', 'error');
+    setBanner('Load a wallet before linking a Stripe payment method.', 'error');
     return;
   }
 
   const runtime = claimedRuntime();
   if (!runtime) {
-    setBanner('The desktop runtime is still starting. Try again in a moment.', 'error');
+    setBanner('The local agent wallet runtime is still starting. Try again in a moment.', 'error');
+    return;
+  }
+
+  if (typeof window.Stripe !== 'function') {
+    setBanner('Stripe.js did not load in the desktop app.', 'error');
     return;
   }
 
   try {
+    resetStripeSetup();
+    const setupIntent = await requestJson(
+      `/api/users/${currentUserId()}/local-wallet-installations/${runtime.walletInstallationId}/stripe/setup-intent`,
+      {
+        method: 'POST'
+      }
+    );
+
+    const stripe = window.Stripe(setupIntent.publishableKey);
+    const elementsApi = stripe.elements({
+      clientSecret: setupIntent.clientSecret
+    });
+    const paymentElement = elementsApi.create('payment');
+    paymentElement.mount('#stripe-payment-element');
+
+    state.stripeSetup = {
+      stripe,
+      elements: elementsApi,
+      paymentElement,
+      setupIntentId: setupIntent.setupIntentId
+    };
+
+    elements.stripePaymentForm.hidden = false;
+    activateTab('funding');
+    setBanner('Stripe card setup started. Enter card details and save the card.');
+  } catch (error) {
+    setBanner(error.message, 'error');
+  }
+});
+
+elements.stripePaymentForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  if (!currentUserId()) {
+    setBanner('Load a wallet before linking a Stripe payment method.', 'error');
+    return;
+  }
+
+  const runtime = claimedRuntime();
+  if (!runtime) {
+    setBanner('The local agent wallet runtime is still starting. Try again in a moment.', 'error');
+    return;
+  }
+
+  if (!state.stripeSetup) {
+    setBanner('Start Stripe card setup first.', 'error');
+    return;
+  }
+
+  try {
+    const { error, setupIntent } = await state.stripeSetup.stripe.confirmSetup({
+      elements: state.stripeSetup.elements,
+      redirect: 'if_required'
+    });
+
+    if (error) {
+      throw error;
+    }
+
     await requestJson(
-      `/api/users/${currentUserId()}/local-wallet-installations/${runtime.walletInstallationId}/payment-method`,
+      `/api/users/${currentUserId()}/local-wallet-installations/${runtime.walletInstallationId}/payment-method/stripe`,
       {
         method: 'POST',
         body: {
-          cardBrand: elements.cardBrand.value,
-          cardLast4: elements.cardLast4.value,
-          expMonth: Number(elements.cardExpMonth.value),
-          expYear: Number(elements.cardExpYear.value)
+          setupIntentId: setupIntent?.id || state.stripeSetup.setupIntentId
         }
       }
     );
+
+    resetStripeSetup();
     await loadState();
     activateTab('funding');
-    setBanner(`Linked payment method to ${runtime.walletInstallationId}.`);
+    setBanner(`Linked Stripe payment method to ${runtime.walletInstallationId}.`);
   } catch (error) {
     setBanner(error.message, 'error');
   }
@@ -547,6 +641,7 @@ elements.forgetButton.addEventListener('click', () => {
   setCurrentUserId(null);
   state.summary = null;
   state.localWalletInstallations = [];
+  resetStripeSetup();
   render();
   setBanner('Forgot the local wallet selection.');
 });

@@ -76,7 +76,8 @@ test('electron shell page exposes a home-first app shell with isolated panels fo
   assert.match(response.body, /id="requests-panel" class="tab-panel" hidden/);
   assert.match(response.body, /id="funding-panel" class="tab-panel" hidden/);
   assert.match(response.body, /fund-form/);
-  assert.match(response.body, /payment-method-form/);
+  assert.match(response.body, /stripe-payment-form/);
+  assert.match(response.body, /stripe-payment-element/);
   assert.doesNotMatch(response.body, /generate-claim-token/);
   assert.doesNotMatch(response.body, /claim-token-card/);
   assert.doesNotMatch(response.body, /install-daemon-form/);
@@ -86,7 +87,7 @@ test('electron shell page exposes a home-first app shell with isolated panels fo
   assert.doesNotMatch(response.body, /new-wallet-button/);
   assert.doesNotMatch(response.body, />Setup</);
   assert.doesNotMatch(response.body, /id="settings-panel"[\s\S]*fund-form/);
-  assert.doesNotMatch(response.body, /id="settings-panel"[\s\S]*payment-method-form/);
+  assert.doesNotMatch(response.body, /id="settings-panel"[\s\S]*stripe-payment-form/);
 });
 
 test('electron app config resolves repo-local defaults and desktop server URL', () => {

@@ -66,7 +66,7 @@ function buildTools() {
     },
     {
       name: 'fund_wallet',
-      description: 'Add mock Stripe funding to a wallet balance.',
+      description: 'Top up a wallet balance. Uses Stripe when the local server is configured for it, otherwise uses the local mock funding path.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -131,7 +131,7 @@ function buildTools() {
     },
     {
       name: 'link_wallet_payment_method',
-      description: 'Link a local mock Stripe payment-method reference to a wallet daemon installation.',
+      description: 'Link a local mock payment-method reference to a wallet daemon installation for CLI and MCP testing.',
       inputSchema: {
         type: 'object',
         properties: {

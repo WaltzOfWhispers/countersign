@@ -57,7 +57,8 @@ test('root page serves the desktop shell as the only local UI surface', async ()
   assert.match(response.body, /data-tab="funding"/);
   assert.match(response.body, /data-tab="settings"/);
   assert.match(response.body, /fund-form/);
-  assert.match(response.body, /payment-method-form/);
+  assert.match(response.body, /stripe-payment-form/);
+  assert.match(response.body, /stripe-payment-element/);
   assert.doesNotMatch(response.body, /href="\/setup\.html"/);
 });
 

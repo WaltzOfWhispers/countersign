@@ -186,33 +186,26 @@
                   <div class="panel-header">
                     <div>
                       <p class="panel-kicker">Payment method</p>
-                      <h2>Link payment method</h2>
+                      <h2>Link card with Stripe</h2>
                     </div>
                   </div>
 
                   <p class="meta">
-                    Attach the payment method this local agent wallet can use when it approves a
-                    request and runs the wallet-side charge flow.
+                    Save a card with Stripe and attach the resulting payment method to this local
+                    agent wallet for top-ups and wallet-side charges.
                   </p>
 
-                  <form id="payment-method-form" class="policy-grid">
-                    <label>
-                      <span>Card brand</span>
-                      <input id="card-brand" name="cardBrand" value="visa" />
-                    </label>
-                    <label>
-                      <span>Last 4</span>
-                      <input id="card-last4" name="cardLast4" value="4242" maxlength="4" />
-                    </label>
-                    <label>
-                      <span>Expiry month</span>
-                      <input id="card-exp-month" type="number" min="1" max="12" value="12" />
-                    </label>
-                    <label>
-                      <span>Expiry year</span>
-                      <input id="card-exp-year" type="number" min="2026" step="1" value="2030" />
-                    </label>
-                    <button class="button" type="submit">Link Payment Method</button>
+                  <div id="funding-payment-method-summary" class="callout muted">
+                    No Stripe payment method linked yet.
+                  </div>
+
+                  <button id="create-stripe-setup-button" class="button secondary" type="button">
+                    Set Up Card with Stripe
+                  </button>
+
+                  <form id="stripe-payment-form" class="stripe-payment-form" hidden>
+                    <div id="stripe-payment-element" class="stripe-payment-element"></div>
+                    <button class="button" type="submit">Save Card</button>
                   </form>
                 </article>
               </section>
@@ -237,15 +230,6 @@
                     </label>
                     <button class="button" type="submit">Create Wallet</button>
                   </form>
-                </article>
-
-                <article class="panel">
-                  <div class="panel-header">
-                    <div>
-                      <p class="panel-kicker">Funding</p>
-                      <h2>Optional stored balance</h2>
-                    </div>
-                  </div>
                 </article>
               </section>
 
@@ -272,6 +256,7 @@
       </main>
     </div>
 
+    <script src="https://js.stripe.com/v3/"></script>
     <script type="module" src="/electron.js"></script>
   </body>
 </html>

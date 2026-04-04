@@ -2,6 +2,8 @@ import { join } from 'node:path';
 
 import { createAgentWalletApp } from '../app.js';
 import { createLocalWalletControlPlane } from '../lib/local-control-plane.js';
+import { runMockStripeWalletCharge } from '../lib/payment-rails.js';
+import { createStripeGateway } from '../lib/stripe-gateway.js';
 
 function centsFromUsd(value, fieldName) {
   const parsed = Number(value);
@@ -43,16 +45,49 @@ function createAppTransport(app) {
 export function createCountersignControlPlane({
   dataFile = join(process.cwd(), 'data', 'store.json'),
   walletDir = join(process.cwd(), 'local-wallet'),
-  trustedAgents = {}
+  trustedAgents = {},
+  stripeGateway = createStripeGateway()
 } = {}) {
   const app = createAgentWalletApp({
     dataFile,
-    trustedAgents
+    walletDir,
+    trustedAgents,
+    stripeGateway
   });
   const send = createAppTransport(app);
   const localControlPlane = createLocalWalletControlPlane({
     send,
-    walletDir
+    walletDir,
+    executeCharge: async ({ installation, walletAccountId, relayRequest }) => {
+      if (!installation.paymentMethod) {
+        return undefined;
+      }
+
+      if (installation.paymentMethod.provider === 'stripe_payment_method' && stripeGateway.enabled) {
+        return stripeGateway.createWalletCharge({
+          customerId: installation.paymentMethod.customerId,
+          paymentMethodId: installation.paymentMethod.paymentMethodId,
+          amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
+          currency: relayRequest.payload.amount?.currency || 'USD',
+          walletAccountId,
+          agentId: relayRequest.payload.agentId,
+          relayRequestId: relayRequest.requestId
+        });
+      }
+
+      if (installation.paymentMethod.provider === 'mock_stripe_payment_method') {
+        return runMockStripeWalletCharge({
+          amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
+          currency: relayRequest.payload.amount?.currency || 'USD',
+          walletAccountId,
+          agentId: relayRequest.payload.agentId,
+          relayRequestId: relayRequest.requestId,
+          paymentMethod: installation.paymentMethod
+        });
+      }
+
+      return undefined;
+    }
   });
 
   async function initialize() {

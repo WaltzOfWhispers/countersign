@@ -5,10 +5,13 @@ import { extname, join, normalize } from 'node:path';
 import { generateEd25519Keypair, signPayload, verifyPayload } from './lib/crypto.js';
 import { createId, nowIsoTimestamp } from './lib/ids.js';
 import { createLocalWalletControlPlane } from './lib/local-control-plane.js';
+import { createStripeGateway } from './lib/stripe-gateway.js';
+import { createWalletInstallationStore } from './lib/wallet-installation-files.js';
 import {
   runMockCrossmintCharge,
   runMockStripeTopUp,
-  runMockStripeTravelCharge
+  runMockStripeTravelCharge,
+  runMockStripeWalletCharge
 } from './lib/payment-rails.js';
 import { DEFAULT_POLICY, evaluatePolicy, normalizePolicy } from './lib/policy.js';
 import { createStore } from './lib/store.js';
@@ -143,6 +146,7 @@ function createUserRecord(name) {
     createdAt: nowIsoTimestamp(),
     wallet: {
       balanceCents: 0,
+      stripeCustomerId: null,
       fundingEvents: [],
       policy: { ...DEFAULT_POLICY }
     }
@@ -167,11 +171,47 @@ export function createAgentWalletApp({
   dataFile = join(process.cwd(), 'data', 'store.json'),
   publicDir = join(process.cwd(), 'public'),
   walletDir = join(process.cwd(), 'local-wallet'),
-  trustedAgents = {}
+  trustedAgents = {},
+  stripeGateway = createStripeGateway()
 } = {}) {
   const storeApi = createStore(dataFile);
+  const walletInstallationStore = createWalletInstallationStore({ walletDir });
+
+  async function executeWalletCharge({ installation, walletAccountId, relayRequest }) {
+    if (!installation.paymentMethod) {
+      return undefined;
+    }
+
+    if (installation.paymentMethod.provider === 'stripe_payment_method' && stripeGateway.enabled) {
+      return stripeGateway.createWalletCharge({
+        customerId: installation.paymentMethod.customerId,
+        paymentMethodId: installation.paymentMethod.paymentMethodId,
+        amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
+        currency: relayRequest.payload.amount?.currency || 'USD',
+        walletAccountId,
+        agentId: relayRequest.payload.agentId,
+        relayRequestId: relayRequest.requestId
+      });
+    }
+
+    if (installation.paymentMethod.provider === 'mock_stripe_payment_method') {
+      return runMockStripeWalletCharge({
+        amountCents: Math.round(Number(relayRequest.payload.amount?.minor)),
+        currency: relayRequest.payload.amount?.currency || 'USD',
+        walletAccountId,
+        agentId: relayRequest.payload.agentId,
+        relayRequestId: relayRequest.requestId,
+        paymentMethod: installation.paymentMethod
+      });
+    }
+
+    return undefined;
+  }
+
   const localControlPlane = createLocalWalletControlPlane({
     walletDir,
+    executeCharge: async ({ installation, walletAccountId, relayRequest }) =>
+      executeWalletCharge({ installation, walletAccountId, relayRequest }),
     send: async (pathname, { method = 'GET', body } = {}) => {
       const response = await routeRequest({
         method,
@@ -232,6 +272,10 @@ export function createAgentWalletApp({
           wallet: {
             keyId: store.walletIdentity.keyId,
             publicKeyPem: store.walletIdentity.publicKeyPem
+          },
+          stripe: {
+            enabled: stripeGateway.enabled,
+            publishableKey: stripeGateway.enabled ? stripeGateway.publishableKey : null
           },
           defaults: {
             policy: DEFAULT_POLICY
@@ -324,6 +368,120 @@ export function createAgentWalletApp({
         };
       }
 
+      const stripeSetupIntentMatch = pathname.match(
+        /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/stripe\/setup-intent$/
+      );
+      if (method === 'POST' && stripeSetupIntentMatch) {
+        if (!stripeGateway.enabled) {
+          return {
+            statusCode: 503,
+            payload: { error: 'Stripe is not configured on this Countersign server.' }
+          };
+        }
+
+        const store = await storeApi.readStore();
+        const user = store.users[stripeSetupIntentMatch[1]];
+        if (!user) {
+          return { statusCode: 404, payload: { error: 'User not found.' } };
+        }
+
+        const walletInstallation = store.walletInstallations[stripeSetupIntentMatch[2]];
+        if (!walletInstallation || walletInstallation.ownerUserId !== user.id) {
+          return {
+            statusCode: 404,
+            payload: { error: 'Claimed wallet installation not found for that wallet account.' }
+          };
+        }
+
+        const customerId = await stripeGateway.ensureCustomer({
+          existingCustomerId: user.wallet.stripeCustomerId,
+          walletAccountId: user.id,
+          walletName: user.name
+        });
+        const setupIntent = await stripeGateway.createSetupIntent({
+          customerId,
+          walletAccountId: user.id,
+          walletInstallationId: walletInstallation.id
+        });
+
+        await storeApi.updateStore((store) => {
+          const storedUser = store.users[user.id];
+          if (storedUser) {
+            storedUser.wallet.stripeCustomerId = customerId;
+          }
+        });
+
+        return {
+          statusCode: 201,
+          payload: {
+            provider: 'stripe',
+            publishableKey: stripeGateway.publishableKey,
+            customerId,
+            setupIntentId: setupIntent.id,
+            clientSecret: setupIntent.clientSecret
+          }
+        };
+      }
+
+      const stripePaymentMethodMatch = pathname.match(
+        /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/payment-method\/stripe$/
+      );
+      if (method === 'POST' && stripePaymentMethodMatch) {
+        if (!stripeGateway.enabled) {
+          return {
+            statusCode: 503,
+            payload: { error: 'Stripe is not configured on this Countersign server.' }
+          };
+        }
+
+        if (!body.setupIntentId) {
+          return {
+            statusCode: 400,
+            payload: { error: 'setupIntentId is required to link a Stripe payment method.' }
+          };
+        }
+
+        const store = await storeApi.readStore();
+        const user = store.users[stripePaymentMethodMatch[1]];
+        if (!user) {
+          return { statusCode: 404, payload: { error: 'User not found.' } };
+        }
+
+        const walletInstallation = store.walletInstallations[stripePaymentMethodMatch[2]];
+        if (!walletInstallation || walletInstallation.ownerUserId !== user.id) {
+          return {
+            statusCode: 404,
+            payload: { error: 'Claimed wallet installation not found for that wallet account.' }
+          };
+        }
+
+        const paymentMethod = await stripeGateway.getPaymentMethodForSetupIntent({
+          setupIntentId: body.setupIntentId
+        });
+        const result = await localControlPlane.linkWalletPaymentMethod({
+          walletInstallationId: walletInstallation.id,
+          paymentMethod
+        });
+
+        await storeApi.updateStore((store) => {
+          const storedUser = store.users[user.id];
+          if (storedUser) {
+            storedUser.wallet.stripeCustomerId =
+              paymentMethod.customerId || storedUser.wallet.stripeCustomerId || null;
+          }
+        });
+
+        return {
+          statusCode: 200,
+          payload: {
+            walletInstallation: result.installation,
+            dashboard: await localControlPlane.getLocalDashboard({
+              walletAccountId: user.id
+            })
+          }
+        };
+      }
+
       const localClaimMatch = pathname.match(
         /^\/api\/users\/([^/]+)\/local-wallet-installations\/([^/]+)\/claim$/
       );
@@ -391,18 +549,61 @@ export function createAgentWalletApp({
           };
         }
 
-        const { store } = await storeApi.updateStore((store) => {
+        const store = await storeApi.readStore();
+        const user = store.users[fundMatch[1]];
+        if (!user) {
+          throw new Error('USER_NOT_FOUND');
+        }
+
+        let fundingEvent = null;
+        if (stripeGateway.enabled) {
+          const latestInstallation = getLatestWalletInstallationForUser(store, user.id);
+          if (!latestInstallation) {
+            return {
+              statusCode: 409,
+              payload: { error: 'Link a claimed agent wallet before funding it with Stripe.' }
+            };
+          }
+
+          let localInstallation = null;
+          try {
+            localInstallation = (
+              await walletInstallationStore.loadWalletInstallation(latestInstallation.id)
+            ).installation;
+          } catch {
+            localInstallation = null;
+          }
+
+          if (!localInstallation?.paymentMethod || localInstallation.paymentMethod.provider !== 'stripe_payment_method') {
+            return {
+              statusCode: 409,
+              payload: { error: 'Link a Stripe payment method in Funding before topping up the wallet.' }
+            };
+          }
+
+          fundingEvent = await stripeGateway.createFundingCharge({
+            customerId: localInstallation.paymentMethod.customerId || user.wallet.stripeCustomerId,
+            paymentMethodId: localInstallation.paymentMethod.paymentMethodId,
+            amountCents,
+            walletAccountId: user.id
+          });
+        }
+
+        const { store: updatedStore } = await storeApi.updateStore((store) => {
           const user = store.users[fundMatch[1]];
           if (!user) {
             throw new Error('USER_NOT_FOUND');
           }
 
-          const fundingEvent = runMockStripeTopUp({ amountCents });
+          const appliedFundingEvent = fundingEvent || runMockStripeTopUp({ amountCents });
           user.wallet.balanceCents += amountCents;
-          user.wallet.fundingEvents.unshift(fundingEvent);
+          user.wallet.fundingEvents.unshift(appliedFundingEvent);
+          if (fundingEvent?.customerId) {
+            user.wallet.stripeCustomerId = fundingEvent.customerId;
+          }
         });
 
-        return { statusCode: 200, payload: buildUserSummary(store, fundMatch[1]) };
+        return { statusCode: 200, payload: buildUserSummary(updatedStore, fundMatch[1]) };
       }
 
       const policyMatch = pathname.match(/^\/api\/users\/([^/]+)\/policy$/);

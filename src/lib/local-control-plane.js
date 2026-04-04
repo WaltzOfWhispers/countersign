@@ -12,8 +12,8 @@ function ensureOk(response, fallbackMessage) {
   throw new Error(response.data?.error || fallbackMessage);
 }
 
-export function createLocalWalletControlPlane({ send, walletDir }) {
-  const walletClient = createWalletDaemonClient({ send });
+export function createLocalWalletControlPlane({ send, walletDir, executeCharge }) {
+  const walletClient = createWalletDaemonClient({ send, executeCharge });
   const walletStore = createWalletInstallationStore({ walletDir });
 
   async function call(pathname, options) {
@@ -40,6 +40,7 @@ export function createLocalWalletControlPlane({ send, walletDir }) {
 
   async function linkWalletPaymentMethod({
     walletInstallationId,
+    paymentMethod,
     cardBrand = 'visa',
     cardLast4 = '4242',
     expMonth = 12,
@@ -47,12 +48,14 @@ export function createLocalWalletControlPlane({ send, walletDir }) {
   }) {
     const result = await walletStore.updateWalletInstallation(walletInstallationId, (installation) => ({
       ...installation,
-      paymentMethod: createMockStripePaymentMethod({
-        cardBrand,
-        cardLast4,
-        expMonth,
-        expYear
-      })
+      paymentMethod:
+        paymentMethod ||
+        createMockStripePaymentMethod({
+          cardBrand,
+          cardLast4,
+          expMonth,
+          expYear
+        })
     }));
 
     return {
